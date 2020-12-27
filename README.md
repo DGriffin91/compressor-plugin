@@ -20,4 +20,3 @@ The plugin logs events to `~/tmp/IMGUIBaseviewCompressor.log`.
 - Copy `target/debug/libbaseview_test_vst2.so` to your VST plugin folder
 - Start your DAW, test the plugin
 
-![Demo](demo.png)
