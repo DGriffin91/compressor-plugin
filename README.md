@@ -11,12 +11,12 @@ The plugin logs events to `~/tmp/IMGUIBaseviewCompressor.log`.
 ## Usage: Windows
 
 - Run `cargo build`
-- Copy `target/debug/libbaseview_test_vst2.dll` to your VST plugin folder
+- Copy `target/debug/imgui_baseview_compressor.dll` to your VST plugin folder
 - Start your DAW, test the plugin
 
 ## Usage: Linux (Untested)
 
 - Run `cargo build`
-- Copy `target/debug/libbaseview_test_vst2.so` to your VST plugin folder
+- Copy `target/debug/imgui_baseview_compressor.so` to your VST plugin folder
 - Start your DAW, test the plugin
 
