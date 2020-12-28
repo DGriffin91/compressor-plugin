@@ -94,7 +94,39 @@ fn update_data(new_data: &mut Vec<f32>, data_to_update: &mut Vec<f32>, max_size:
     data_to_update.append(new_data);
     let data_len = data_to_update.len();
     if data_len > max_size {
-        data_to_update.drain(0..(data_len - max_size));
+        data_to_update.drain(0..(data_len - max_size).max(0));
+    }
+}
+
+fn alt_graph(ui: &Ui, id: &ImStr, size: [f32; 2], v_scale: f32, v_offset: f32, values: &[f32]) {
+    let draw_list = ui.get_window_draw_list();
+
+    let mut cursor = ui.cursor_screen_pos();
+    ui.invisible_button(id, size);
+
+    let mut color = if ui.is_item_hovered() {
+        ui.style_color(StyleColor::PlotLinesHovered)
+    } else {
+        ui.style_color(StyleColor::PlotLines)
+    };
+    let scale = (size[0] as f32 / values.len() as f32) as f32;
+    //color[3] = (color[3] * scale * 2.0).min(1.0).max(0.0);
+    color[3] = (color[3] * 0.5).min(1.0).max(0.0);
+    let v_center = size[1] / 2.0;
+    let mut last = 0.0 + v_offset;
+    for (i, n) in values.iter().enumerate() {
+        let fi = i as f32;
+        let next = n * v_scale + v_offset;
+        let x_ofs = if (next - last).abs() < 1.0 { 1.0 } else { 0.0 };
+        draw_list
+            .add_line(
+                [cursor[0] + fi * scale, cursor[1] + v_center + last],
+                [cursor[0] + fi * scale + x_ofs, cursor[1] + v_center + next],
+                color,
+            )
+            .thickness(2.5)
+            .build();
+        last = next;
     }
 }
 
@@ -165,7 +197,7 @@ impl Editor for CompressorPluginEditor {
             |run: &mut bool, ui: &Ui, state: &mut Arc<EditorState>| {
                 let mut editor_only = state.editor_only.lock().unwrap();
                 let sample_rate = state.sample_rate.get() as usize;
-                let window_size = sample_rate / 30;
+                let window_size = 3000;
                 update_data(
                     &mut consume(&mut editor_only.cv_consumer),
                     &mut editor_only.cv_data,
@@ -183,11 +215,30 @@ impl Editor for CompressorPluginEditor {
                     .size([1024.0, 200.0], Condition::Appearing)
                     .position([20.0, 20.0], Condition::Appearing);
                 w.build(&ui, || {
-                    graph(
+                    //graph(
+                    //    ui,
+                    //    &editor_only.amplitude_data,
+                    //    &editor_only.cv_data,
+                    //    window_size as f32,
+                    //);
+
+                    let cursor = ui.cursor_pos();
+                    alt_graph(
                         ui,
+                        im_str!("Graph"),
+                        [1500.0, 512.0],
+                        512.0,
+                        0.0,
                         &editor_only.amplitude_data,
+                    );
+                    ui.set_cursor_pos(cursor);
+                    alt_graph(
+                        ui,
+                        im_str!("Graph"),
+                        [1500.0, 512.0],
+                        -128.0,
+                        -256.0 + 129.0,
                         &editor_only.cv_data,
-                        window_size as f32,
                     );
                     //ui.plot_lines(im_str!("X"), &editor_only.cv_data)
                     //    .graph_size([800.0, 256.0])

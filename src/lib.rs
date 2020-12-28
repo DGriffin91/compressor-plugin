@@ -25,7 +25,7 @@ use ringbuf::{Producer, RingBuffer};
 
 use vst::util::AtomicFloat;
 
-const DATA_SIZE: usize = 8192;
+const DATA_SIZE: usize = 3000;
 
 impl Default for CompressorPlugin {
     fn default() -> Self {
@@ -148,11 +148,10 @@ impl Plugin for CompressorPlugin {
 
             let cv_filtered = self.cv_low_pass_filter.process(cv);
             let amp_filtered = self.amplitude_low_pass_filter.process(input_l + input_r);
-            if self.data_i > (self.sample_rate as u32 / 256) {
+            if self.data_i >= 96 {
+                //(self.sample_rate as u32 / 4000)
                 if !self.cv_producer.is_full() {
-                    self.cv_producer
-                        .push(db_from_gain(cv_filtered) + 100.0)
-                        .unwrap();
+                    self.cv_producer.push(cv_filtered).unwrap();
                 }
                 if !self.amplitude_producer.is_full() {
                     self.amplitude_producer.push(amp_filtered).unwrap();
