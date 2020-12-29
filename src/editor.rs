@@ -11,10 +11,7 @@ use vst::editor::Editor;
 use baseview::{AppRunner, Parent, Size, WindowOpenOptions, WindowScalePolicy};
 
 use raw_window_handle::RawWindowHandle;
-use std::{
-    f32::consts::PI,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 use vst::util::AtomicFloat;
 
 use ringbuf::Consumer;
@@ -60,11 +57,50 @@ pub fn make_knob(
     draw_wiper_knob(&knob, circle_color, wiper_color, track_color);
 }
 
+//find a better name?
+pub struct ConsumerDump {
+    pub data: Vec<f32>,
+    consumer: Consumer<f32>,
+    max_size: usize,
+}
+
+impl ConsumerDump {
+    pub fn new(consumer: Consumer<f32>, max_size: usize) -> ConsumerDump {
+        ConsumerDump {
+            data: Vec::new(),
+            consumer,
+            max_size,
+        }
+    }
+
+    pub fn consume(&mut self) {
+        for _ in 0..self.consumer.len() {
+            if let Some(n) = self.consumer.pop() {
+                self.data.push(n);
+            } else {
+                break;
+            }
+        }
+        self.trim_data()
+    }
+
+    pub fn set_max_size(&mut self, max_size: usize) {
+        self.max_size = max_size;
+        self.trim_data();
+    }
+
+    pub fn trim_data(&mut self) {
+        //Trims from the start of the vec
+        let data_len = self.data.len();
+        if data_len > self.max_size {
+            self.data.drain(0..(data_len - self.max_size).max(0));
+        }
+    }
+}
+
 pub struct EditorOnlyState {
-    pub cv_consumer: Consumer<f32>,
-    pub amplitude_consumer: Consumer<f32>,
-    pub cv_data: Vec<f32>,
-    pub amplitude_data: Vec<f32>,
+    pub cv_data: ConsumerDump,
+    pub amplitude_data: ConsumerDump,
 }
 
 pub struct EditorState {
@@ -78,30 +114,10 @@ pub struct CompressorPluginEditor {
     pub state: Arc<EditorState>,
 }
 
-fn consume(consumer: &mut Consumer<f32>) -> Vec<f32> {
-    let mut data = Vec::new();
-    for _ in 0..consumer.len() {
-        if let Some(n) = consumer.pop() {
-            data.push(n);
-        } else {
-            break;
-        }
-    }
-    data
-}
-
-fn update_data(new_data: &mut Vec<f32>, data_to_update: &mut Vec<f32>, max_size: usize) {
-    data_to_update.append(new_data);
-    let data_len = data_to_update.len();
-    if data_len > max_size {
-        data_to_update.drain(0..(data_len - max_size).max(0));
-    }
-}
-
 fn alt_graph(ui: &Ui, id: &ImStr, size: [f32; 2], v_scale: f32, v_offset: f32, values: &[f32]) {
     let draw_list = ui.get_window_draw_list();
 
-    let mut cursor = ui.cursor_screen_pos();
+    let cursor = ui.cursor_screen_pos();
     ui.invisible_button(id, size);
 
     let mut color = if ui.is_item_hovered() {
@@ -196,19 +212,8 @@ impl Editor for CompressorPluginEditor {
             |_context: &mut Context, _state: &mut Arc<EditorState>| {},
             |run: &mut bool, ui: &Ui, state: &mut Arc<EditorState>| {
                 let mut editor_only = state.editor_only.lock().unwrap();
-                let sample_rate = state.sample_rate.get() as usize;
-                let window_size = 3000;
-                update_data(
-                    &mut consume(&mut editor_only.cv_consumer),
-                    &mut editor_only.cv_data,
-                    window_size,
-                );
-
-                update_data(
-                    &mut consume(&mut editor_only.amplitude_consumer),
-                    &mut editor_only.amplitude_data,
-                    window_size,
-                );
+                editor_only.cv_data.consume();
+                editor_only.amplitude_data.consume();
 
                 ui.show_demo_window(run);
                 let w = Window::new(im_str!("Example 1: Basic sliders"))
@@ -227,9 +232,9 @@ impl Editor for CompressorPluginEditor {
                         ui,
                         im_str!("Graph"),
                         [1500.0, 512.0],
-                        512.0,
+                        128.0,
                         0.0,
-                        &editor_only.amplitude_data,
+                        &editor_only.amplitude_data.data,
                     );
                     ui.set_cursor_pos(cursor);
                     alt_graph(
@@ -238,7 +243,7 @@ impl Editor for CompressorPluginEditor {
                         [1500.0, 512.0],
                         -128.0,
                         -256.0 + 129.0,
-                        &editor_only.cv_data,
+                        &editor_only.cv_data.data,
                     );
                     //ui.plot_lines(im_str!("X"), &editor_only.cv_data)
                     //    .graph_size([800.0, 256.0])

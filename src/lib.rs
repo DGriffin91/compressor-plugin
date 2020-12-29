@@ -13,7 +13,7 @@ mod parameter;
 
 use compressor::{db_from_gain, Compressor};
 use compressor_effect_parameters::CompressorEffectParameters;
-use editor::{CompressorPluginEditor, EditorOnlyState, EditorState};
+use editor::{CompressorPluginEditor, ConsumerDump, EditorOnlyState, EditorState};
 
 use vst::buffer::AudioBuffer;
 use vst::editor::Editor;
@@ -27,6 +27,19 @@ use vst::util::AtomicFloat;
 
 const DATA_SIZE: usize = 3000;
 
+struct CompressorPlugin {
+    params: Arc<CompressorEffectParameters>,
+    editor: Option<CompressorPluginEditor>,
+    sample_rate: f32,
+    compressor: Compressor,
+    cv_producer: Producer<f32>,
+    amplitude_producer: Producer<f32>,
+    cv_low_pass_filter: low_pass_filter::LowPassFilter,
+    amplitude_low_pass_filter: low_pass_filter::LowPassFilter,
+    data_i: u32,
+    block_size: i64,
+}
+
 impl Default for CompressorPlugin {
     fn default() -> Self {
         let params = Arc::new(CompressorEffectParameters::default());
@@ -38,6 +51,7 @@ impl Default for CompressorPlugin {
         Self {
             params: params.clone(),
             sample_rate: 44100.0,
+            block_size: 128,
             cv_producer,
             amplitude_producer,
             editor: Some(CompressorPluginEditor {
@@ -46,10 +60,8 @@ impl Default for CompressorPlugin {
                     params: params.clone(),
                     sample_rate: AtomicFloat::new(44100.0),
                     editor_only: Arc::new(Mutex::new(EditorOnlyState {
-                        cv_consumer,
-                        amplitude_consumer,
-                        cv_data: Vec::new(),
-                        amplitude_data: Vec::new(),
+                        cv_data: ConsumerDump::new(cv_consumer, DATA_SIZE),
+                        amplitude_data: ConsumerDump::new(amplitude_consumer, DATA_SIZE),
                     })),
                 }),
             }),
@@ -97,13 +109,17 @@ impl Plugin for CompressorPlugin {
     }
 
     fn set_sample_rate(&mut self, rate: f32) {
-        let fs = f32::from(rate);
-        self.sample_rate = fs;
-        self.cv_low_pass_filter.set_sample_rate(fs);
-        self.amplitude_low_pass_filter.set_sample_rate(fs);
+        let rate = rate as f32;
+        self.sample_rate = rate;
+        self.cv_low_pass_filter.set_sample_rate(rate);
+        self.amplitude_low_pass_filter.set_sample_rate(rate);
         if let Some(editor) = &self.editor {
-            editor.state.sample_rate.set(fs);
+            editor.state.sample_rate.set(rate);
         }
+    }
+
+    fn set_block_size(&mut self, block_size: i64) {
+        self.block_size = block_size;
     }
 
     fn init(&mut self) {
@@ -149,7 +165,6 @@ impl Plugin for CompressorPlugin {
             let cv_filtered = self.cv_low_pass_filter.process(cv);
             let amp_filtered = self.amplitude_low_pass_filter.process(input_l + input_r);
             if self.data_i >= 96 {
-                //(self.sample_rate as u32 / 4000)
                 if !self.cv_producer.is_full() {
                     self.cv_producer.push(cv_filtered).unwrap();
                 }
@@ -167,18 +182,6 @@ impl Plugin for CompressorPlugin {
     fn get_parameter_object(&mut self) -> Arc<dyn PluginParameters> {
         Arc::clone(&self.params) as Arc<dyn PluginParameters>
     }
-}
-
-struct CompressorPlugin {
-    params: Arc<CompressorEffectParameters>,
-    editor: Option<CompressorPluginEditor>,
-    sample_rate: f32,
-    compressor: Compressor,
-    cv_producer: Producer<f32>,
-    amplitude_producer: Producer<f32>,
-    cv_low_pass_filter: low_pass_filter::LowPassFilter,
-    amplitude_low_pass_filter: low_pass_filter::LowPassFilter,
-    data_i: u32,
 }
 
 impl PluginParameters for CompressorEffectParameters {
