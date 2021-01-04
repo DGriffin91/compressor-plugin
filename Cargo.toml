@@ -14,8 +14,8 @@ baseview = {git = "https://github.com/RustAudio/baseview", branch = "master"}
 dirs = "3"
 log = "0.4"
 log-panics = "2"
-raw-window-handle = "0.3"
 simplelog = "0.8"
+raw-window-handle = "0.3"
 vst = "0.2"
 rtrb = "0.1.1"
 imgui-baseview = {git = "https://github.com/BillyDM/imgui-baseview", branch = "main"}

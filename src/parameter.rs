@@ -1,12 +1,5 @@
+use crate::units::{from_range, to_range};
 use vst::util::AtomicFloat;
-
-fn to_range(x: f32, bottom: f32, top: f32) -> f32 {
-    x * (top - bottom) + bottom
-}
-
-fn from_range(x: f32, bottom: f32, top: f32) -> f32 {
-    (x - bottom) / (top - bottom)
-}
 
 pub struct Parameter {
     name: String,
@@ -28,7 +21,7 @@ impl Parameter {
     ) -> Parameter {
         Parameter {
             name: String::from(name),
-            normalized_value: AtomicFloat::new(from_range(default, min, max)),
+            normalized_value: AtomicFloat::new(from_range(min, max, default)),
             value: AtomicFloat::new(default),
             default,
             min,
@@ -43,7 +36,7 @@ impl Parameter {
 
     pub fn set_normalized(&self, x: f32) {
         self.normalized_value.set(x);
-        self.value.set(to_range(x, self.min, self.max));
+        self.value.set(to_range(self.min, self.max, x));
     }
 
     pub fn get(&self) -> f32 {
@@ -52,7 +45,7 @@ impl Parameter {
 
     pub fn set(&self, x: f32) {
         self.value.set(x);
-        self.normalized_value.set(from_range(x, self.min, self.max));
+        self.normalized_value.set(from_range(self.min, self.max, x));
     }
 
     pub fn get_display(&self) -> String {

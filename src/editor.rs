@@ -1,16 +1,16 @@
 use imgui::*;
 use imgui_knobs::*;
 
-use imgui_baseview::{HiDpiMode, RenderSettings, Runner, Settings};
+use imgui_baseview::{HiDpiMode, ImguiWindow, RenderSettings, Settings};
 
 use crate::compressor_effect_parameters::CompressorEffectParameters;
 use crate::parameter::Parameter;
 
 use vst::editor::Editor;
 
-use baseview::{AppRunner, Parent, Size, WindowOpenOptions, WindowScalePolicy};
+use baseview::{Size, WindowOpenOptions, WindowScalePolicy};
 
-use raw_window_handle::RawWindowHandle;
+use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::sync::{Arc, Mutex};
 use vst::util::AtomicFloat;
 
@@ -110,7 +110,7 @@ pub struct EditorState {
 }
 
 pub struct CompressorPluginEditor {
-    pub runner: Option<AppRunner>,
+    pub is_open: bool,
     pub state: Arc<EditorState>,
 }
 
@@ -188,25 +188,25 @@ impl Editor for CompressorPluginEditor {
 
     fn open(&mut self, parent: *mut ::std::ffi::c_void) -> bool {
         //::log::info!("self.running {}", self.running);
-        if self.runner.is_some() {
-            return true;
+        if self.is_open {
+            return false;
         }
 
-        let parent = raw_window_handle_from_parent(parent);
+        self.is_open = true;
 
         let settings = Settings {
             window: WindowOpenOptions {
                 title: String::from("imgui-baseview demo window"),
                 size: Size::new(WINDOW_WIDTH as f64, WINDOW_HEIGHT as f64),
                 scale: WindowScalePolicy::SystemScaleFactor,
-                parent: Parent::WithParent(parent),
             },
             clear_color: (0.0, 0.0, 0.0),
             hidpi_mode: HiDpiMode::Default,
             render_settings: RenderSettings::default(),
         };
 
-        let (_handle, runner) = Runner::open(
+        ImguiWindow::open_parented(
+            &VstParent(parent),
             settings,
             self.state.clone(),
             |_context: &mut Context, _state: &mut Arc<EditorState>| {},
@@ -232,7 +232,7 @@ impl Editor for CompressorPluginEditor {
                         ui,
                         im_str!("Graph"),
                         [1500.0, 512.0],
-                        128.0,
+                        512.0,
                         0.0,
                         &editor_only.amplitude_data.data,
                     );
@@ -267,6 +267,26 @@ impl Editor for CompressorPluginEditor {
                         ui,
                         &params.threshold,
                         im_str!("%.2fdB"),
+                        &base,
+                        &highlight,
+                        &lowlight,
+                    );
+                    ui.next_column();
+
+                    make_knob(
+                        ui,
+                        &params.knee,
+                        im_str!("%.2fdB"),
+                        &base,
+                        &highlight,
+                        &lowlight,
+                    );
+                    ui.next_column();
+
+                    make_knob(
+                        ui,
+                        &params.transition,
+                        im_str!("%.2f"),
                         &base,
                         &highlight,
                         &lowlight,
@@ -316,46 +336,52 @@ impl Editor for CompressorPluginEditor {
             },
         );
 
-        self.runner = runner;
-
         true
     }
 
     fn is_open(&mut self) -> bool {
-        self.runner.is_some()
+        self.is_open
     }
 
     fn close(&mut self) {
-        self.runner = None;
+        self.is_open = false;
     }
 }
 
-#[cfg(target_os = "macos")]
-fn raw_window_handle_from_parent(parent: *mut ::std::ffi::c_void) -> RawWindowHandle {
-    use raw_window_handle::macos::MacOSHandle;
+struct VstParent(*mut ::std::ffi::c_void);
 
-    RawWindowHandle::MacOS(MacOSHandle {
-        ns_view: parent as *mut ::std::ffi::c_void,
-        ..MacOSHandle::empty()
-    })
+#[cfg(target_os = "macos")]
+unsafe impl HasRawWindowHandle for VstParent {
+    fn raw_window_handle(&self) -> RawWindowHandle {
+        use raw_window_handle::macos::MacOSHandle;
+
+        RawWindowHandle::MacOS(MacOSHandle {
+            ns_view: self.0 as *mut ::std::ffi::c_void,
+            ..MacOSHandle::empty()
+        })
+    }
 }
 
 #[cfg(target_os = "windows")]
-fn raw_window_handle_from_parent(parent: *mut ::std::ffi::c_void) -> RawWindowHandle {
-    use raw_window_handle::windows::WindowsHandle;
+unsafe impl HasRawWindowHandle for VstParent {
+    fn raw_window_handle(&self) -> RawWindowHandle {
+        use raw_window_handle::windows::WindowsHandle;
 
-    RawWindowHandle::Windows(WindowsHandle {
-        hwnd: parent,
-        ..WindowsHandle::empty()
-    })
+        RawWindowHandle::Windows(WindowsHandle {
+            hwnd: self.0,
+            ..WindowsHandle::empty()
+        })
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn raw_window_handle_from_parent(parent: *mut ::std::ffi::c_void) -> RawWindowHandle {
-    use raw_window_handle::unix::XcbHandle;
+unsafe impl HasRawWindowHandle for VstParent {
+    fn raw_window_handle(&self) -> RawWindowHandle {
+        use raw_window_handle::unix::XcbHandle;
 
-    RawWindowHandle::Xcb(XcbHandle {
-        window: parent as u32,
-        ..XcbHandle::empty()
-    })
+        RawWindowHandle::Xcb(XcbHandle {
+            window: self.0 as u32,
+            ..XcbHandle::empty()
+        })
+    }
 }

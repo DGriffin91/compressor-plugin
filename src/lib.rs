@@ -6,14 +6,18 @@
 extern crate vst;
 
 mod compressor;
+mod compressor2;
 mod compressor_effect_parameters;
 mod editor;
 mod low_pass_filter;
 mod parameter;
+mod units;
 
-use compressor::{db_from_gain, Compressor};
+use compressor::Compressor;
+use compressor2::Compressor2;
 use compressor_effect_parameters::CompressorEffectParameters;
 use editor::{CompressorPluginEditor, ConsumerDump, EditorOnlyState, EditorState};
+use units::{db_from_gain, gain_from_db};
 
 use vst::buffer::AudioBuffer;
 use vst::editor::Editor;
@@ -31,7 +35,7 @@ struct CompressorPlugin {
     params: Arc<CompressorEffectParameters>,
     editor: Option<CompressorPluginEditor>,
     sample_rate: f32,
-    compressor: Compressor,
+    compressor: Compressor2,
     cv_producer: Producer<f32>,
     amplitude_producer: Producer<f32>,
     cv_low_pass_filter: low_pass_filter::LowPassFilter,
@@ -55,7 +59,7 @@ impl Default for CompressorPlugin {
             cv_producer,
             amplitude_producer,
             editor: Some(CompressorPluginEditor {
-                runner: None,
+                is_open: false,
                 state: Arc::new(EditorState {
                     params: params.clone(),
                     sample_rate: AtomicFloat::new(44100.0),
@@ -65,7 +69,7 @@ impl Default for CompressorPlugin {
                     })),
                 }),
             }),
-            compressor: Compressor::new(),
+            compressor: Compressor2::new(),
             cv_low_pass_filter: low_pass_filter::LowPassFilter::new(),
             amplitude_low_pass_filter: low_pass_filter::LowPassFilter::new(),
             data_i: 0,
@@ -94,10 +98,10 @@ fn setup_logging() {
 impl Plugin for CompressorPlugin {
     fn get_info(&self) -> Info {
         Info {
-            name: "IMGUI Compressor in Rust".to_string(),
+            name: "IMGUI Compressor in Rust 0.1".to_string(),
             vendor: "DGriffin".to_string(),
             unique_id: 243123123,
-            version: 1,
+            version: 2,
             inputs: 2,
             outputs: 2,
             // This `parameters` bit is important; without it, none of our
@@ -138,12 +142,16 @@ impl Plugin for CompressorPlugin {
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
         self.compressor.update_prams(
             self.params.threshold.get(),
+            self.params.knee.get(),
+            self.params.transition.get(),
             self.params.ratio.get(),
             self.params.attack.get(),
             self.params.release.get(),
             self.params.gain.get(),
             self.sample_rate,
         );
+        let gain = gain_from_db(self.params.gain.get());
+
         let (inputs, outputs) = buffer.split();
         let (inputs_left, inputs_right) = inputs.split_at(1);
         let (mut outputs_left, mut outputs_right) = outputs.split_at_mut(1);
@@ -159,10 +167,11 @@ impl Plugin for CompressorPlugin {
 
             let cv = self.compressor.process(detector_input);
 
-            *output_l = *input_l * cv;
-            *output_r = *input_r * cv;
+            *output_l = *input_l * cv * gain;
+            *output_r = *input_r * cv * gain;
 
             let cv_filtered = self.cv_low_pass_filter.process(cv);
+
             let amp_filtered = self.amplitude_low_pass_filter.process(input_l + input_r);
             if self.data_i >= 96 {
                 if !self.cv_producer.is_full() {
