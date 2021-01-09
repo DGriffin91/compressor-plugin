@@ -285,8 +285,18 @@ impl Editor for CompressorPluginEditor {
 
                     make_knob(
                         ui,
-                        &params.transition,
+                        &params.pre_smooth,
                         im_str!("%.2f"),
+                        &base,
+                        &highlight,
+                        &lowlight,
+                    );
+                    ui.next_column();
+
+                    make_knob(
+                        ui,
+                        &params.rms,
+                        im_str!("%.0fms"),
                         &base,
                         &highlight,
                         &lowlight,
@@ -306,7 +316,7 @@ impl Editor for CompressorPluginEditor {
                     make_knob(
                         ui,
                         &params.attack,
-                        im_str!("%.2f"),
+                        im_str!("%.2fms"),
                         &base,
                         &highlight,
                         &lowlight,
@@ -316,7 +326,7 @@ impl Editor for CompressorPluginEditor {
                     make_knob(
                         ui,
                         &params.release,
-                        im_str!("%.2f"),
+                        im_str!("%.2fms"),
                         &base,
                         &highlight,
                         &lowlight,

@@ -56,7 +56,9 @@ impl Compressor {
         } else {
             self.release_gain
         };
-        self.envelope = detector_input + cte * (self.envelope - detector_input);
+        let detector_input_sq = detector_input.powi(2);
+        let env_sq = detector_input_sq + cte * (self.envelope - detector_input_sq);
+        self.envelope = env_sq.sqrt();
 
         // Compressor transfer function
         if self.envelope > self.threshold {

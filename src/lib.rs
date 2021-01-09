@@ -106,7 +106,7 @@ impl Plugin for CompressorPlugin {
             outputs: 2,
             // This `parameters` bit is important; without it, none of our
             // parameters will be shown!
-            parameters: 5,
+            parameters: self.params.len() as i32,
             category: Category::Effect,
             ..Default::default()
         }
@@ -143,7 +143,8 @@ impl Plugin for CompressorPlugin {
         self.compressor.update_prams(
             self.params.threshold.get(),
             self.params.knee.get(),
-            self.params.transition.get(),
+            self.params.pre_smooth.get(),
+            self.params.rms.get(),
             self.params.ratio.get(),
             self.params.attack.get(),
             self.params.release.get(),

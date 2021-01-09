@@ -2,11 +2,11 @@ import matplotlib.pyplot as plt
 from math import *
 
 
-def gain_from_db(decibels):
+def lin_from_db(decibels):
     return pow(10.0, decibels * 0.05)
 
 
-def db_from_gain(gain):
+def db_from_lin(gain):
     return log(gain, 10.0) * 20.0
 
 
@@ -33,13 +33,13 @@ def smoothstep(edge0, edge1, x):
     return x * x * (3.0 - 2.0 * x)
 
 
-threshold = gain_from_db(-6.0)
-knee = gain_from_db(3.0)
+threshold = lin_from_db(-6.0)
+knee = lin_from_db(6.0)
 
 attack = 10
-release = 100
+release = 50
 sample_rate = 48000
-ratio = 2
+ratio = 5
 
 slope = 1.0 / ratio - 1.0
 
@@ -80,22 +80,90 @@ def basic(env, threshold, ratio):
     return 1.0
 
 
-for i in range(1, 1000):
-    detector_input = min((i / 1000), 1.0)
-    data.append(detector_input)
+class DecoupledPeakDetector(object):
+    def __init__(self, attack, release, sample_rate):
+        super().__init__()
+        self.attack_input = attack
+        self.release_input = release
+        self.env = 1
+        self.env2 = 1
+        self.sample_rate = sample_rate
+        self.update()
+
+    def process(self, x):
+        self.env = max(x, self.release * self.env)
+        self.env2 = self.attack * self.env2 + (1 - self.attack) * self.env
+        return self.env2
+
+    def process_smooth(self, x):
+        self.env = max(x, self.release * self.env + (1 - self.release) * x)
+        self.env2 = self.attack * self.env2 + (1 - self.attack) * self.env
+        return self.env2
+
+    def update(self):
+        self.attack = exp(-2.0 * pi * 1000.0 / self.attack_input / self.sample_rate)
+        self.release = exp(
+            -2.0
+            * pi
+            * 1000.0
+            / (self.release_input + self.attack_input)
+            / self.sample_rate
+        )
+
+    def set_sample_rate(self, sample_rate):
+        self.sample_rate = sample_rate
+        self.update()
+
+    def set_attack(self, attack):
+        self.attack_input = attack
+        self.update()
+
+    def set_release(self, release):
+        self.release_input = release
+        self.update()
+
+
+# pre_det = DecoupledPeakDetector(attack, release, sample_rate)
+det = DecoupledPeakDetector(attack, release, sample_rate)
+
+a = 100.0 + floor(((attack) / 1000.0) * sample_rate)
+b = 1000.0 + floor(((release) / 1000.0) * sample_rate)
+
+print(a)
+print(b)
+
+for i in range(1, 3500):
+
+    if i == a:
+        data2.append(-0.75)
+    if i == b:
+        data2.append(-0.75)
+
+    # detector_input = min((i / 1000), 1.0)
+    detector_input = lin_from_db(-12)
+    if 100 < i < 1000:
+        detector_input = lin_from_db(0.0)
+
+    # data.append(detector_input)
 
     env = detector_input + attack_gain * (env - detector_input)
-    env_db = db_from_gain(env)
+    env_db = db_from_lin(env)
+
+    # env_db = db_from_lin(detector_input)
 
     # cv = basic(env, threshold, ratio)
-    cv = gain_from_db(
-        reiss(env_db, db_from_gain(threshold), db_from_gain(knee), ratio) - env_db
-    )
+    cv = env_db - reiss(env_db, db_from_lin(threshold), db_from_lin(knee), ratio)
+    # cv = lin_from_db(cv)
+    cv = lin_from_db(-det.process_smooth(cv))
+    # data2.append(env)
 
-    data2.append(cv * detector_input)
+    # cv = lin_from_db(-env)
 
+    data2.append(-cv)
+
+
+print(attack_gain)
 plt.plot(data)
 plt.plot(data2)
-
 plt.show()
 
