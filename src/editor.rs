@@ -23,11 +23,12 @@ const WINDOW_WIDTH_F: f32 = 1024.0;
 const WINDOW_HEIGHT_F: f32 = 1024.0;
 
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-const BG_COLOR: [f32; 4] = [0.21 * 1.3, 0.11 * 1.6, 0.25 * 1.3, 1.0];
-const BG_COLOR_TRANSP: [f32; 4] = [0.21 * 1.3, 0.11 * 1.6, 0.25 * 1.3, 0.0];
+const BG_COLOR: [f32; 4] = [0.21 * 1.4, 0.11 * 1.7, 0.25 * 1.4, 1.0];
+const BG_COLOR_TRANSP: [f32; 4] = [0.21 * 1.4, 0.11 * 1.7, 0.25 * 1.4, 0.0];
 const GREEN: [f32; 4] = [0.23, 0.68, 0.23, 1.0];
 const GREEN_HOVERED: [f32; 4] = [0.23 * 1.1, 0.68 * 1.1, 0.23 * 1.1, 1.0];
-const RED: [f32; 4] = [0.96, 0.0, 0.2, 1.0];
+const RED: [f32; 4] = [0.98, 0.02, 0.22, 1.0];
+const RED_TRANSP: [f32; 4] = [0.98, 0.02, 0.22, 0.333];
 const RED_HOVERED: [f32; 4] = [1.0, 0.1, 0.3, 1.0];
 const ORANGE: [f32; 4] = [1.0, 0.58, 0.0, 1.0];
 const ORANGE_HOVERED: [f32; 4] = [1.0, 0.68, 0.1, 1.0];
@@ -51,7 +52,13 @@ pub fn draw_knob(knob: &Knob, wiper_color: &ColorSet, track_color: &ColorSet) {
     }
 }
 
-pub fn make_knob(ui: &Ui, parameter: &Parameter, wiper_color: &ColorSet, track_color: &ColorSet) {
+pub fn make_knob(
+    ui: &Ui,
+    parameter: &Parameter,
+    wiper_color: &ColorSet,
+    track_color: &ColorSet,
+    title_fix: f32,
+) {
     let width = ui.text_line_height() * 4.75;
     let w = ui.push_item_width(width);
     let title = parameter.get_name();
@@ -72,7 +79,7 @@ pub fn make_knob(ui: &Ui, parameter: &Parameter, wiper_color: &ColorSet, track_c
     );
     let drag_id = &ImString::new(format!("##{}_KNOB_DRAG_CONTORL_", title));
     let cursor = ui.cursor_pos();
-    ui.set_cursor_pos([cursor[0], cursor[1] - 10.0]);
+    ui.set_cursor_pos([cursor[0] + title_fix, cursor[1] - 10.0]);
     knob_title(ui, &ImString::new(parameter.get_display()), width);
 
     if knob.value_changed {
@@ -277,10 +284,12 @@ fn draw_db_lines(
             )
             .filled(true)
             .build();
+        let s = format!("{}", i);
+        let offset = s.len() as f32 * 4.0;
         draw_list.add_text(
-            [cursor[0] + pos, cursor[1] + size[1] + 15.0],
+            [cursor[0] + pos - offset, cursor[1] + size[1] + 15.0],
             text_color,
-            format!("{}", i),
+            s,
         )
     }
 }
@@ -349,10 +358,10 @@ fn draw_meter_knob(
                 radius,
                 0.21,
                 peak_knob.angle,
-                peak_knob.angle + 0.2,
+                peak_knob.angle + 0.1,
                 &ColorSet::new(color, color, color),
-                16,
-                2,
+                8,
+                1,
             );
         }
     }
@@ -409,7 +418,7 @@ impl Editor for CompressorPluginEditor {
                     .movable(false);
                 w.build(&ui, || {
                     let text_style_color = ui.push_style_color(StyleColor::Text, TEXT);
-                    let graph_v_center = 225.0;
+                    let graph_v_center = 225.0 + 25.0;
                     {
                         let draw_list = ui.get_window_draw_list();
                         draw_list.add_rect_filled_multicolor(
@@ -433,7 +442,7 @@ impl Editor for CompressorPluginEditor {
                             .filled(true)
                             .build();
                     }
-                    ui.set_cursor_pos([0.0, 0.0]);
+                    ui.set_cursor_pos([0.0, 25.0]);
                     let col = ui.push_style_color(StyleColor::PlotLines, ORANGE);
                     let col2 = ui.push_style_color(StyleColor::PlotLinesHovered, ORANGE);
                     draw_graph(
@@ -490,24 +499,27 @@ impl Editor for CompressorPluginEditor {
                             )
                             .filled(true)
                             .build();
-                        let knee = gain_from_db(state.params.knee.get()).powf(0.5) * 6.0;
+                        let knee_setting = state.params.knee.get();
+                        if knee_setting > 0.1 {
+                            let knee = gain_from_db(knee_setting).powf(0.5) * 6.0;
 
-                        draw_list.add_rect_filled_multicolor(
-                            [0.0, graph_v_center - 92.0],
-                            [1024.0, graph_v_center - 92.0 + knee],
-                            [0.8, 0.1, 0.1, 0.5],
-                            [0.8, 0.1, 0.1, 0.5],
-                            [0.8, 0.1, 0.1, 0.0],
-                            [0.8, 0.1, 0.1, 0.0],
-                        );
-                        draw_list.add_rect_filled_multicolor(
-                            [0.0, graph_v_center + 92.0],
-                            [1024.0, graph_v_center + 92.0 - knee],
-                            [0.8, 0.1, 0.1, 0.5],
-                            [0.8, 0.1, 0.1, 0.5],
-                            [0.8, 0.1, 0.1, 0.0],
-                            [0.8, 0.1, 0.1, 0.0],
-                        );
+                            draw_list.add_rect_filled_multicolor(
+                                [0.0, graph_v_center - 92.0],
+                                [1024.0, graph_v_center - 92.0 + knee],
+                                [0.8, 0.1, 0.1, 0.5],
+                                [0.8, 0.1, 0.1, 0.5],
+                                [0.8, 0.1, 0.1, 0.0],
+                                [0.8, 0.1, 0.1, 0.0],
+                            );
+                            draw_list.add_rect_filled_multicolor(
+                                [0.0, graph_v_center + 92.0],
+                                [1024.0, graph_v_center + 92.0 - knee],
+                                [0.8, 0.1, 0.1, 0.5],
+                                [0.8, 0.1, 0.1, 0.5],
+                                [0.8, 0.1, 0.1, 0.0],
+                                [0.8, 0.1, 0.1, 0.0],
+                            );
+                        }
                         draw_list
                             .add_line(
                                 [0.0, graph_v_center - 92.0],
@@ -526,16 +538,16 @@ impl Editor for CompressorPluginEditor {
                             .build();
                     }
 
-                    ui.set_cursor_pos([0.0, 32.0]);
                     let col = ui.push_style_color(StyleColor::PlotLines, RED);
                     let col2 = ui.push_style_color(StyleColor::PlotLinesHovered, RED);
+                    ui.set_cursor_pos([0.0, 50.0]);
                     draw_graph(
                         ui,
                         im_str!("Graph"),
                         [1024.0, 450.0],
                         -128.0,
                         -256.0 + 129.0,
-                        2.0,
+                        3.0,
                         editor_only.sample_data.data.len(),
                         |i| editor_only.sample_data.data[i].cv,
                     );
@@ -559,11 +571,11 @@ impl Editor for CompressorPluginEditor {
                     let highlight = ColorSet::new(ORANGE, ORANGE_HOVERED, ORANGE_HOVERED);
 
                     let params = &state.params;
-                    ui.set_cursor_pos([12.0, 110.0]);
+                    ui.set_cursor_pos([12.0, 135.0]);
                     ui.text(&params.threshold.get_display());
 
                     let line_height = ui.text_line_height();
-                    ui.set_cursor_pos([20.0, 479.0]);
+                    ui.set_cursor_pos([40.0, 479.0]);
                     draw_meter_knob(
                         ui,
                         db_from_gain((left + right) * 0.5),
@@ -578,39 +590,39 @@ impl Editor for CompressorPluginEditor {
 
                     ui.set_cursor_pos([24.0, 450.0]);
                     let lowlight = ColorSet::from([0.0, 0.0, 0.0, 1.0]);
-                    ui.columns(8, im_str!("cols"), false);
+                    ui.columns(6, im_str!("cols"), false);
 
-                    ui.set_column_offset(0, 20.0);
+                    ui.set_column_offset(0, 40.0);
 
-                    ui.set_cursor_pos([20.0, 450.0]);
+                    ui.set_cursor_pos([40.0, 450.0]);
 
-                    make_knob(ui, &params.threshold, &highlight, &lowlight);
+                    make_knob(ui, &params.threshold, &highlight, &lowlight, 35.0);
                     ui.next_column();
 
-                    make_knob(ui, &params.knee, &highlight, &lowlight);
+                    make_knob(ui, &params.knee, &highlight, &lowlight, 0.0);
                     ui.next_column();
 
-                    make_knob(ui, &params.pre_smooth, &highlight, &lowlight);
+                    //make_knob(ui, &params.pre_smooth, &highlight, &lowlight);
+                    //ui.next_column();
+
+                    //make_knob(ui, &params.rms, &highlight, &lowlight);
+                    //ui.next_column();
+
+                    make_knob(ui, &params.ratio, &highlight, &lowlight, 0.0);
                     ui.next_column();
 
-                    make_knob(ui, &params.rms, &highlight, &lowlight);
+                    make_knob(ui, &params.attack, &highlight, &lowlight, 0.0);
                     ui.next_column();
 
-                    make_knob(ui, &params.ratio, &highlight, &lowlight);
+                    make_knob(ui, &params.release, &highlight, &lowlight, 0.0);
                     ui.next_column();
 
-                    make_knob(ui, &params.attack, &highlight, &lowlight);
-                    ui.next_column();
-
-                    make_knob(ui, &params.release, &highlight, &lowlight);
-                    ui.next_column();
-
-                    make_knob(ui, &params.gain, &highlight, &lowlight);
+                    make_knob(ui, &params.gain, &highlight, &lowlight, 0.0);
                     ui.next_column();
 
                     ui.columns(1, im_str!("nocols"), false);
 
-                    ui.set_cursor_pos([25.0, 702.0]);
+                    ui.set_cursor_pos([30.0, 702.0]);
                     ui.text("IN");
                     ui.set_cursor_pos([65.0, 670.0]);
                     draw_db_lines(
@@ -640,7 +652,7 @@ impl Editor for CompressorPluginEditor {
                         false,
                     );
 
-                    ui.set_cursor_pos([25.0, 752.0]);
+                    ui.set_cursor_pos([30.0, 752.0]);
                     ui.text("GR");
                     ui.set_cursor_pos([65.0, 715.0]);
                     draw_meter(
@@ -666,7 +678,7 @@ impl Editor for CompressorPluginEditor {
                         RED,
                         true,
                     );
-                    ui.set_cursor_pos([25.0, 802.0]);
+                    ui.set_cursor_pos([20.0, 802.0]);
                     ui.text("OUT");
                     ui.set_cursor_pos([65.0, 765.0]);
                     draw_meter(
