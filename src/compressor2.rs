@@ -16,7 +16,7 @@ fn reiss(x: f32, threshold: f32, width: f32, ratio: f32, slope: f32) -> f32 {
     }
 }
 
-struct DecoupledPeakDetector {
+pub struct DecoupledPeakDetector {
     attack: f32,
     release: f32,
     env: f32,
@@ -35,13 +35,13 @@ impl DecoupledPeakDetector {
         detector
     }
 
-    fn process(&mut self, x: f32) -> f32 {
+    pub fn process(&mut self, x: f32) -> f32 {
         self.env = x.max(self.release * self.env);
         self.env2 = self.attack * self.env2 + (1.0 - self.attack) * self.env;
         self.env2
     }
 
-    fn process_smooth(&mut self, x: f32) -> f32 {
+    pub fn process_smooth(&mut self, x: f32) -> f32 {
         self.env = x.max(self.release * self.env + (1.0 - self.release) * x);
         self.env2 = self.attack * self.env2 + (1.0 - self.attack) * self.env;
 
@@ -54,7 +54,7 @@ impl DecoupledPeakDetector {
         self.env2
     }
 
-    fn update(&mut self, attack: f32, release: f32, sample_rate: f32) {
+    pub fn update(&mut self, attack: f32, release: f32, sample_rate: f32) {
         self.attack = (-1.0 * PI * 1000.0 / attack / sample_rate).exp();
         self.release = (-1.0 * PI * 1000.0 / release / sample_rate).exp();
     }

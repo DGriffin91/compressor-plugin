@@ -5,18 +5,18 @@
 #[macro_use]
 extern crate vst;
 
-mod compressor;
-mod compressor2;
+pub mod compressor;
+pub mod compressor2;
 mod compressor_effect_parameters;
 mod editor;
-mod low_pass_filter;
+pub mod low_pass_filter;
 mod parameter;
-mod units;
+pub mod units;
 
 use compressor2::Compressor2;
 use compressor_effect_parameters::CompressorEffectParameters;
-use editor::{CompressorPluginEditor, ConsumerDump, EditorOnlyState, EditorState};
-use units::{gain_from_db, Sample};
+use editor::{CompressorPluginEditor, EditorOnlyState, EditorState};
+use units::{gain_from_db, ConsumerDump, Sample};
 
 use vst::buffer::AudioBuffer;
 use vst::editor::Editor;

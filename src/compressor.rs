@@ -1,6 +1,5 @@
 use std::f32::consts::PI;
 
-use crate::low_pass_filter;
 use crate::units::gain_from_db;
 
 pub struct Compressor {

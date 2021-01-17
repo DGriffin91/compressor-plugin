@@ -1,7 +1,7 @@
 use imgui::*;
 use imgui_knobs::*;
 
-use crate::units::{db_from_gain, from_range, gain_from_db, sign, Sample};
+use crate::units::{db_from_gain, from_range, gain_from_db, sign, ConsumerDump, Sample};
 use imgui_baseview::{HiDpiMode, ImguiWindow, RenderSettings, Settings};
 
 use crate::compressor_effect_parameters::CompressorEffectParameters;
@@ -15,24 +15,18 @@ use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::sync::{Arc, Mutex};
 use vst::util::AtomicFloat;
 
-use ringbuf::Consumer;
-
 const WINDOW_WIDTH: usize = 1024;
 const WINDOW_HEIGHT: usize = 1024;
-const WINDOW_WIDTH_F: f32 = 1024.0;
-const WINDOW_HEIGHT_F: f32 = 1024.0;
+const WINDOW_WIDTH_F: f32 = WINDOW_WIDTH as f32;
+const WINDOW_HEIGHT_F: f32 = WINDOW_HEIGHT as f32;
 
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const BG_COLOR: [f32; 4] = [0.21 * 1.4, 0.11 * 1.7, 0.25 * 1.4, 1.0];
 const BG_COLOR_TRANSP: [f32; 4] = [0.21 * 1.4, 0.11 * 1.7, 0.25 * 1.4, 0.0];
 const GREEN: [f32; 4] = [0.23, 0.68, 0.23, 1.0];
-const GREEN_HOVERED: [f32; 4] = [0.23 * 1.1, 0.68 * 1.1, 0.23 * 1.1, 1.0];
 const RED: [f32; 4] = [0.98, 0.02, 0.22, 1.0];
-const RED_TRANSP: [f32; 4] = [0.98, 0.02, 0.22, 0.333];
-const RED_HOVERED: [f32; 4] = [1.0, 0.1, 0.3, 1.0];
 const ORANGE: [f32; 4] = [1.0, 0.58, 0.0, 1.0];
 const ORANGE_HOVERED: [f32; 4] = [1.0, 0.68, 0.1, 1.0];
-const GREY: [f32; 4] = [0.21, 0.19, 0.21, 1.0];
 const WAVEFORM_LINES: [f32; 4] = [1.0, 1.0, 1.0, 0.2];
 const TEXT: [f32; 4] = [1.0, 1.0, 1.0, 0.75];
 const DB_LINES: [f32; 4] = [1.0, 1.0, 1.0, 0.15];
@@ -77,7 +71,6 @@ pub fn make_knob(
         width * 0.5,
         true,
     );
-    let drag_id = &ImString::new(format!("##{}_KNOB_DRAG_CONTORL_", title));
     let cursor = ui.cursor_pos();
     ui.set_cursor_pos([cursor[0] + title_fix, cursor[1] - 10.0]);
     knob_title(ui, &ImString::new(parameter.get_display()), width);
@@ -88,47 +81,6 @@ pub fn make_knob(
 
     w.pop(ui);
     draw_knob(&knob, wiper_color, track_color);
-}
-
-//find a better name?
-pub struct ConsumerDump<T> {
-    pub data: Vec<T>,
-    consumer: Consumer<T>,
-    max_size: usize,
-}
-
-impl<T> ConsumerDump<T> {
-    pub fn new(consumer: Consumer<T>, max_size: usize) -> ConsumerDump<T> {
-        ConsumerDump {
-            data: Vec::new(),
-            consumer,
-            max_size,
-        }
-    }
-
-    pub fn consume(&mut self) {
-        for _ in 0..self.consumer.len() {
-            if let Some(n) = self.consumer.pop() {
-                self.data.push(n);
-            } else {
-                break;
-            }
-        }
-        self.trim_data()
-    }
-
-    pub fn set_max_size(&mut self, max_size: usize) {
-        self.max_size = max_size;
-        self.trim_data();
-    }
-
-    pub fn trim_data(&mut self) {
-        //Trims from the start of the vec
-        let data_len = self.data.len();
-        if data_len > self.max_size {
-            self.data.drain(0..(data_len - self.max_size).max(0));
-        }
-    }
 }
 
 pub struct EditorOnlyState {
@@ -367,6 +319,256 @@ fn draw_meter_knob(
     }
 }
 
+fn move_cursor(ui: &Ui, x: f32, y: f32) {
+    let cursor = ui.cursor_pos();
+    ui.set_cursor_pos([cursor[0] + x, cursor[1] + y])
+}
+
+fn floating_text(ui: &Ui, text: &str) {
+    ui.get_window_draw_list()
+        .add_text(ui.cursor_pos(), ui.style_color(StyleColor::Text), text)
+}
+
+fn draw_meters(
+    ui: &Ui,
+    left: f32,
+    right: f32,
+    cv: f32,
+    recent_peak_l: f32,
+    recent_peak_r: f32,
+    recent_peak_cv: f32,
+    gain: f32,
+) {
+    let distance_between_pairs = 30.0;
+    let distance_between_meters = 15.0;
+
+    let start_cursor_x = ui.cursor_pos()[0];
+
+    move_cursor(ui, 62.0, -45.0);
+    draw_db_lines(
+        ui,
+        -36.0,
+        0.0,
+        -39.0,
+        3.0,
+        1.0,
+        [WINDOW_WIDTH_F - 65.0, 200.0],
+        3,
+        DB_LINES,
+        TEXT,
+    );
+
+    move_cursor(ui, 15.0, 35.0);
+
+    move_cursor(ui, -45.0, 0.0);
+    floating_text(ui, "IN");
+    move_cursor(ui, 45.0, 0.0);
+
+    draw_meter(
+        ui,
+        [WINDOW_WIDTH_F - 65.0, 4.0],
+        db_from_gain(left),
+        db_from_gain(recent_peak_l),
+        -39.0,
+        3.0,
+        BLACK,
+        GREEN,
+        false,
+    );
+
+    move_cursor(ui, 0.0, distance_between_meters);
+
+    draw_meter(
+        ui,
+        [WINDOW_WIDTH_F - 65.0, 4.0],
+        db_from_gain(right),
+        db_from_gain(recent_peak_r),
+        -39.0,
+        3.0,
+        BLACK,
+        GREEN,
+        false,
+    );
+
+    move_cursor(ui, -45.0, distance_between_pairs);
+    floating_text(ui, "GR");
+    move_cursor(ui, 45.0, 0.0);
+
+    draw_meter(
+        ui,
+        [WINDOW_WIDTH_F - 65.0, 4.0],
+        db_from_gain(cv),
+        db_from_gain(recent_peak_cv),
+        -39.0,
+        3.0,
+        BLACK,
+        RED,
+        true,
+    );
+    move_cursor(ui, 0.0, distance_between_meters);
+    draw_meter(
+        ui,
+        [WINDOW_WIDTH_F - 65.0, 4.0],
+        db_from_gain(cv),
+        db_from_gain(recent_peak_cv),
+        -39.0,
+        3.0,
+        BLACK,
+        RED,
+        true,
+    );
+    move_cursor(ui, -55.0, distance_between_pairs);
+    floating_text(ui, "OUT");
+    move_cursor(ui, 55.0, 0.0);
+    let gain = gain_from_db(gain);
+    draw_meter(
+        ui,
+        [WINDOW_WIDTH_F - 65.0, 4.0],
+        db_from_gain(left * cv * gain),
+        db_from_gain(recent_peak_cv * recent_peak_l * gain),
+        -39.0,
+        3.0,
+        BLACK,
+        GREEN,
+        false,
+    );
+    move_cursor(ui, 0.0, distance_between_meters);
+    draw_meter(
+        ui,
+        [WINDOW_WIDTH_F - 65.0, 4.0],
+        db_from_gain(right * cv * gain),
+        db_from_gain(recent_peak_cv * recent_peak_r * gain),
+        -39.0,
+        3.0,
+        BLACK,
+        GREEN,
+        false,
+    );
+    let cursor = ui.cursor_pos();
+    ui.set_cursor_pos([start_cursor_x, cursor[1] + 160.0]);
+}
+
+fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut Arc<EditorState>) {
+    let init_cursor = ui.cursor_pos();
+    let editor_only = state.editor_only.lock().unwrap();
+    let sample_data = &editor_only.sample_data.data;
+    let col = ui.push_style_color(StyleColor::PlotLines, ORANGE);
+    let col2 = ui.push_style_color(StyleColor::PlotLinesHovered, ORANGE);
+    draw_graph(
+        ui,
+        im_str!("Graph"),
+        [WINDOW_WIDTH_F, graph_height],
+        225.0 / gain_from_db(state.params.threshold.get()).powf(0.8), // / 256.0
+        0.0,
+        2.5,
+        sample_data.len(),
+        |i| {
+            let val = sample_data[i].left + sample_data[i].right;
+            sign((val.abs()).powf(0.8), val)
+        },
+    );
+    {
+        let draw_list = ui.get_window_draw_list();
+        draw_list.add_rect_filled_multicolor(
+            [0.0, graph_v_center + 92.0],
+            [WINDOW_WIDTH_F, graph_v_center + 92.0 + 128.0],
+            BG_COLOR_TRANSP,
+            BG_COLOR_TRANSP,
+            BG_COLOR,
+            BG_COLOR,
+        );
+        draw_list
+            .add_rect(
+                [0.0, graph_v_center + 92.0 + 128.0],
+                [WINDOW_WIDTH_F, WINDOW_HEIGHT_F],
+                BG_COLOR,
+            )
+            .filled(true)
+            .build();
+    }
+    col.pop(ui);
+    col2.pop(ui);
+    {
+        //threshold line
+        let draw_list = ui.get_window_draw_list();
+        draw_list
+            .add_rect(
+                [0.0, 0.0],
+                [WINDOW_WIDTH_F, graph_v_center - 92.0],
+                [0.0, 0.0, 0.0, 0.65],
+            )
+            .filled(true)
+            .build();
+        draw_list
+            .add_rect(
+                [0.0, graph_v_center + 92.0],
+                [WINDOW_WIDTH_F, WINDOW_HEIGHT_F],
+                [0.0, 0.0, 0.0, 0.65],
+            )
+            .filled(true)
+            .build();
+        let knee_setting = state.params.knee.get();
+        if knee_setting > 0.1 {
+            let knee = gain_from_db(knee_setting).powf(0.5) * 6.0;
+
+            draw_list.add_rect_filled_multicolor(
+                [0.0, graph_v_center - 92.0],
+                [WINDOW_WIDTH_F, graph_v_center - 92.0 + knee],
+                [0.8, 0.1, 0.1, 0.5],
+                [0.8, 0.1, 0.1, 0.5],
+                [0.8, 0.1, 0.1, 0.0],
+                [0.8, 0.1, 0.1, 0.0],
+            );
+            draw_list.add_rect_filled_multicolor(
+                [0.0, graph_v_center + 92.0],
+                [WINDOW_WIDTH_F, graph_v_center + 92.0 - knee],
+                [0.8, 0.1, 0.1, 0.5],
+                [0.8, 0.1, 0.1, 0.5],
+                [0.8, 0.1, 0.1, 0.0],
+                [0.8, 0.1, 0.1, 0.0],
+            );
+        }
+        draw_list
+            .add_line(
+                [0.0, graph_v_center - 92.0],
+                [WINDOW_WIDTH_F, graph_v_center - 92.0],
+                WAVEFORM_LINES,
+            )
+            .thickness(2.0)
+            .build();
+        draw_list
+            .add_line(
+                [0.0, graph_v_center + 92.0],
+                [WINDOW_WIDTH_F, graph_v_center + 92.0],
+                WAVEFORM_LINES,
+            )
+            .thickness(2.0)
+            .build();
+    }
+
+    let col = ui.push_style_color(StyleColor::PlotLines, RED);
+    let col2 = ui.push_style_color(StyleColor::PlotLinesHovered, RED);
+    ui.set_cursor_pos(init_cursor);
+    move_cursor(ui, 0.0, 20.0);
+    draw_graph(
+        ui,
+        im_str!("Graph"),
+        [WINDOW_WIDTH_F, graph_height],
+        -128.0,
+        -256.0 + 129.0,
+        3.0,
+        sample_data.len(),
+        |i| sample_data[i].cv,
+    );
+    col.pop(ui);
+    col2.pop(ui);
+    ui.set_cursor_pos(init_cursor);
+    move_cursor(ui, 12.0, 108.0);
+    floating_text(ui, &state.params.threshold.get_display());
+    ui.set_cursor_pos(init_cursor);
+    move_cursor(ui, 0.0, graph_height);
+}
+
 impl Editor for CompressorPluginEditor {
     fn position(&self) -> (i32, i32) {
         (0, 0)
@@ -406,9 +608,11 @@ impl Editor for CompressorPluginEditor {
                     config: None,
                 }]);
             },
-            |run: &mut bool, ui: &Ui, state: &mut Arc<EditorState>| {
-                let mut editor_only = state.editor_only.lock().unwrap();
-                editor_only.sample_data.consume();
+            |_run: &mut bool, ui: &Ui, state: &mut Arc<EditorState>| {
+                {
+                    let mut editor_only = state.editor_only.lock().unwrap();
+                    editor_only.sample_data.consume();
+                }
                 //ui.show_demo_window(run);
                 let w = Window::new(im_str!("Example 1: Basic sliders"))
                     .size([WINDOW_WIDTH_F, WINDOW_HEIGHT_F], Condition::Appearing)
@@ -443,116 +647,9 @@ impl Editor for CompressorPluginEditor {
                             .build();
                     }
                     ui.set_cursor_pos([0.0, 25.0]);
-                    let col = ui.push_style_color(StyleColor::PlotLines, ORANGE);
-                    let col2 = ui.push_style_color(StyleColor::PlotLinesHovered, ORANGE);
-                    draw_graph(
-                        ui,
-                        im_str!("Graph"),
-                        [WINDOW_WIDTH_F, 450.0],
-                        225.0 / gain_from_db(state.params.threshold.get()).powf(0.8), // / 256.0
-                        0.0,
-                        2.5,
-                        editor_only.sample_data.data.len(),
-                        |i| {
-                            let val = editor_only.sample_data.data[i].left
-                                + editor_only.sample_data.data[i].right;
-                            sign((val.abs()).powf(0.8), val)
-                        },
-                    );
-                    {
-                        let draw_list = ui.get_window_draw_list();
-                        draw_list.add_rect_filled_multicolor(
-                            [0.0, graph_v_center + 92.0],
-                            [WINDOW_WIDTH_F, graph_v_center + 92.0 + 128.0],
-                            BG_COLOR_TRANSP,
-                            BG_COLOR_TRANSP,
-                            BG_COLOR,
-                            BG_COLOR,
-                        );
-                        draw_list
-                            .add_rect(
-                                [0.0, graph_v_center + 92.0 + 128.0],
-                                [WINDOW_WIDTH_F, WINDOW_HEIGHT_F],
-                                BG_COLOR,
-                            )
-                            .filled(true)
-                            .build();
-                    }
-                    col.pop(ui);
-                    col2.pop(ui);
-                    {
-                        //threshold line
-                        let draw_list = ui.get_window_draw_list();
-                        draw_list
-                            .add_rect(
-                                [0.0, 0.0],
-                                [1024.0, graph_v_center - 92.0],
-                                [0.0, 0.0, 0.0, 0.65],
-                            )
-                            .filled(true)
-                            .build();
-                        draw_list
-                            .add_rect(
-                                [0.0, graph_v_center + 92.0],
-                                [1024.0, 1024.0],
-                                [0.0, 0.0, 0.0, 0.65],
-                            )
-                            .filled(true)
-                            .build();
-                        let knee_setting = state.params.knee.get();
-                        if knee_setting > 0.1 {
-                            let knee = gain_from_db(knee_setting).powf(0.5) * 6.0;
+                    draw_graphs(ui, graph_v_center, 450.0, state);
 
-                            draw_list.add_rect_filled_multicolor(
-                                [0.0, graph_v_center - 92.0],
-                                [1024.0, graph_v_center - 92.0 + knee],
-                                [0.8, 0.1, 0.1, 0.5],
-                                [0.8, 0.1, 0.1, 0.5],
-                                [0.8, 0.1, 0.1, 0.0],
-                                [0.8, 0.1, 0.1, 0.0],
-                            );
-                            draw_list.add_rect_filled_multicolor(
-                                [0.0, graph_v_center + 92.0],
-                                [1024.0, graph_v_center + 92.0 - knee],
-                                [0.8, 0.1, 0.1, 0.5],
-                                [0.8, 0.1, 0.1, 0.5],
-                                [0.8, 0.1, 0.1, 0.0],
-                                [0.8, 0.1, 0.1, 0.0],
-                            );
-                        }
-                        draw_list
-                            .add_line(
-                                [0.0, graph_v_center - 92.0],
-                                [1024.0, graph_v_center - 92.0],
-                                WAVEFORM_LINES,
-                            )
-                            .thickness(2.0)
-                            .build();
-                        draw_list
-                            .add_line(
-                                [0.0, graph_v_center + 92.0],
-                                [1024.0, graph_v_center + 92.0],
-                                WAVEFORM_LINES,
-                            )
-                            .thickness(2.0)
-                            .build();
-                    }
-
-                    let col = ui.push_style_color(StyleColor::PlotLines, RED);
-                    let col2 = ui.push_style_color(StyleColor::PlotLinesHovered, RED);
-                    ui.set_cursor_pos([0.0, 50.0]);
-                    draw_graph(
-                        ui,
-                        im_str!("Graph"),
-                        [1024.0, 450.0],
-                        -128.0,
-                        -256.0 + 129.0,
-                        3.0,
-                        editor_only.sample_data.data.len(),
-                        |i| editor_only.sample_data.data[i].cv,
-                    );
-                    col.pop(ui);
-                    col2.pop(ui);
+                    let mut editor_only = state.editor_only.lock().unwrap();
 
                     let last = editor_only.sample_data.data.len() - 1;
                     let left = editor_only.sample_data.data[last].left_rms;
@@ -571,11 +668,20 @@ impl Editor for CompressorPluginEditor {
                     let highlight = ColorSet::new(ORANGE, ORANGE_HOVERED, ORANGE_HOVERED);
 
                     let params = &state.params;
-                    ui.set_cursor_pos([12.0, 135.0]);
-                    ui.text(&params.threshold.get_display());
 
                     let line_height = ui.text_line_height();
-                    ui.set_cursor_pos([40.0, 479.0]);
+
+                    let lowlight = ColorSet::from(BLACK);
+                    ui.columns(7, im_str!("cols"), false);
+                    let width = WINDOW_WIDTH_F / 6.75;
+                    for i in 1..7 {
+                        ui.set_column_width(i, width);
+                    }
+                    ui.set_column_width(0, width * 0.5);
+
+                    ui.next_column();
+                    make_knob(ui, &params.threshold, &highlight, &lowlight, 0.0);
+                    move_cursor(ui, 0.0, -113.0);
                     draw_meter_knob(
                         ui,
                         db_from_gain((left + right) * 0.5),
@@ -587,16 +693,6 @@ impl Editor for CompressorPluginEditor {
                         GREEN,
                         BLACK,
                     );
-
-                    ui.set_cursor_pos([24.0, 450.0]);
-                    let lowlight = ColorSet::from([0.0, 0.0, 0.0, 1.0]);
-                    ui.columns(6, im_str!("cols"), false);
-
-                    ui.set_column_offset(0, 40.0);
-
-                    ui.set_cursor_pos([40.0, 450.0]);
-
-                    make_knob(ui, &params.threshold, &highlight, &lowlight, 35.0);
                     ui.next_column();
 
                     make_knob(ui, &params.knee, &highlight, &lowlight, 0.0);
@@ -622,101 +718,18 @@ impl Editor for CompressorPluginEditor {
 
                     ui.columns(1, im_str!("nocols"), false);
 
-                    ui.set_cursor_pos([30.0, 702.0]);
-                    ui.text("IN");
-                    ui.set_cursor_pos([65.0, 670.0]);
-                    draw_db_lines(
+                    move_cursor(ui, 0.0, 84.0);
+                    draw_meters(
                         ui,
-                        -36.0,
-                        0.0,
-                        -39.0,
-                        3.0,
-                        1.0,
-                        [WINDOW_WIDTH_F - 65.0, 200.0],
-                        3,
-                        DB_LINES,
-                        TEXT,
+                        left,
+                        right,
+                        cv,
+                        editor_only.recent_peak_l,
+                        editor_only.recent_peak_r,
+                        editor_only.recent_peak_cv,
+                        params.gain.get(),
                     );
 
-                    ui.set_cursor_pos([65.0, 700.0]);
-
-                    draw_meter(
-                        ui,
-                        [WINDOW_WIDTH_F - 65.0, 4.0],
-                        db_from_gain(left),
-                        db_from_gain(editor_only.recent_peak_l),
-                        -39.0,
-                        3.0,
-                        BLACK,
-                        GREEN,
-                        false,
-                    );
-
-                    ui.set_cursor_pos([30.0, 752.0]);
-                    ui.text("GR");
-                    ui.set_cursor_pos([65.0, 715.0]);
-                    draw_meter(
-                        ui,
-                        [WINDOW_WIDTH_F - 65.0, 4.0],
-                        db_from_gain(right),
-                        db_from_gain(editor_only.recent_peak_r),
-                        -39.0,
-                        3.0,
-                        BLACK,
-                        GREEN,
-                        false,
-                    );
-                    ui.set_cursor_pos([65.0, 750.0]);
-                    draw_meter(
-                        ui,
-                        [WINDOW_WIDTH_F - 65.0, 4.0],
-                        db_from_gain(cv),
-                        db_from_gain(editor_only.recent_peak_cv),
-                        -39.0,
-                        3.0,
-                        BLACK,
-                        RED,
-                        true,
-                    );
-                    ui.set_cursor_pos([20.0, 802.0]);
-                    ui.text("OUT");
-                    ui.set_cursor_pos([65.0, 765.0]);
-                    draw_meter(
-                        ui,
-                        [WINDOW_WIDTH_F - 65.0, 4.0],
-                        db_from_gain(cv),
-                        db_from_gain(editor_only.recent_peak_cv),
-                        -39.0,
-                        3.0,
-                        BLACK,
-                        RED,
-                        true,
-                    );
-                    ui.set_cursor_pos([65.0, 800.0]);
-                    let gain = gain_from_db(params.gain.get());
-                    draw_meter(
-                        ui,
-                        [WINDOW_WIDTH_F - 65.0, 4.0],
-                        db_from_gain(left * cv * gain),
-                        db_from_gain(editor_only.recent_peak_cv * editor_only.recent_peak_l * gain),
-                        -39.0,
-                        3.0,
-                        BLACK,
-                        GREEN,
-                        false,
-                    );
-                    ui.set_cursor_pos([65.0, 815.0]);
-                    draw_meter(
-                        ui,
-                        [WINDOW_WIDTH_F - 65.0, 4.0],
-                        db_from_gain(right * cv * gain),
-                        db_from_gain(editor_only.recent_peak_cv * editor_only.recent_peak_r * gain),
-                        -39.0,
-                        3.0,
-                        BLACK,
-                        GREEN,
-                        false,
-                    );
                     text_style_color.pop(ui);
                 });
             },
