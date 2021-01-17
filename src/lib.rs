@@ -13,11 +13,10 @@ mod low_pass_filter;
 mod parameter;
 mod units;
 
-use compressor::Compressor;
 use compressor2::Compressor2;
 use compressor_effect_parameters::CompressorEffectParameters;
 use editor::{CompressorPluginEditor, ConsumerDump, EditorOnlyState, EditorState};
-use units::{db_from_gain, gain_from_db};
+use units::{gain_from_db, Sample};
 
 use vst::buffer::AudioBuffer;
 use vst::editor::Editor;
@@ -34,12 +33,15 @@ const DATA_SIZE: usize = 3000;
 struct CompressorPlugin {
     params: Arc<CompressorEffectParameters>,
     editor: Option<CompressorPluginEditor>,
-    sample_rate: f32,
+    time: Arc<AtomicFloat>,
+    sample_rate: Arc<AtomicFloat>,
     compressor: Compressor2,
-    cv_producer: Producer<f32>,
-    amplitude_producer: Producer<f32>,
-    cv_low_pass_filter: low_pass_filter::LowPassFilter,
-    amplitude_low_pass_filter: low_pass_filter::LowPassFilter,
+    sample_producer: Producer<Sample>,
+    cv_lpf: low_pass_filter::LowPassFilter,
+    amplitude_lpf_l: low_pass_filter::LowPassFilter,
+    amplitude_lpf_r: low_pass_filter::LowPassFilter,
+    amplitude_rms_l: units::AccumulatingRMS,
+    amplitude_rms_r: units::AccumulatingRMS,
     data_i: u32,
     block_size: i64,
 }
@@ -47,31 +49,37 @@ struct CompressorPlugin {
 impl Default for CompressorPlugin {
     fn default() -> Self {
         let params = Arc::new(CompressorEffectParameters::default());
+        let time = Arc::new(AtomicFloat::new(0.0));
+        let sample_rate = Arc::new(AtomicFloat::new(44100.0));
 
-        let cv_ring = RingBuffer::<f32>::new(DATA_SIZE);
-        let amplitude_ring = RingBuffer::<f32>::new(DATA_SIZE);
-        let (cv_producer, cv_consumer) = cv_ring.split();
-        let (amplitude_producer, amplitude_consumer) = amplitude_ring.split();
+        let sample_ring = RingBuffer::<Sample>::new(DATA_SIZE);
+        let (sample_producer, sample_consumer) = sample_ring.split();
         Self {
             params: params.clone(),
-            sample_rate: 44100.0,
+            sample_rate: sample_rate.clone(),
             block_size: 128,
-            cv_producer,
-            amplitude_producer,
+            sample_producer,
+            time: time.clone(),
             editor: Some(CompressorPluginEditor {
                 is_open: false,
                 state: Arc::new(EditorState {
                     params: params.clone(),
-                    sample_rate: AtomicFloat::new(44100.0),
+                    sample_rate: sample_rate.clone(),
+                    time: time.clone(),
                     editor_only: Arc::new(Mutex::new(EditorOnlyState {
-                        cv_data: ConsumerDump::new(cv_consumer, DATA_SIZE),
-                        amplitude_data: ConsumerDump::new(amplitude_consumer, DATA_SIZE),
+                        sample_data: ConsumerDump::new(sample_consumer, DATA_SIZE),
+                        recent_peak_l: 0.0,
+                        recent_peak_r: 0.0,
+                        recent_peak_cv: 0.0,
                     })),
                 }),
             }),
             compressor: Compressor2::new(),
-            cv_low_pass_filter: low_pass_filter::LowPassFilter::new(),
-            amplitude_low_pass_filter: low_pass_filter::LowPassFilter::new(),
+            cv_lpf: low_pass_filter::LowPassFilter::new(50.0, 0.2, 44100.0),
+            amplitude_lpf_l: low_pass_filter::LowPassFilter::new(50.0, 0.2, 44100.0),
+            amplitude_lpf_r: low_pass_filter::LowPassFilter::new(50.0, 0.2, 44100.0),
+            amplitude_rms_l: units::AccumulatingRMS::new(44100, 5.0, 192000),
+            amplitude_rms_r: units::AccumulatingRMS::new(44100, 5.0, 192000),
             data_i: 0,
         }
     }
@@ -113,13 +121,14 @@ impl Plugin for CompressorPlugin {
     }
 
     fn set_sample_rate(&mut self, rate: f32) {
-        let rate = rate as f32;
-        self.sample_rate = rate;
-        self.cv_low_pass_filter.set_sample_rate(rate);
-        self.amplitude_low_pass_filter.set_sample_rate(rate);
-        if let Some(editor) = &self.editor {
-            editor.state.sample_rate.set(rate);
-        }
+        self.sample_rate.set(rate);
+        self.cv_lpf.set_sample_rate(rate);
+        self.amplitude_lpf_l.set_sample_rate(rate);
+        self.amplitude_lpf_r.set_sample_rate(rate);
+        self.amplitude_rms_l
+            .resize(rate as usize, self.params.rms.get());
+        self.amplitude_rms_r
+            .resize(rate as usize, self.params.rms.get());
     }
 
     fn set_block_size(&mut self, block_size: i64) {
@@ -149,8 +158,12 @@ impl Plugin for CompressorPlugin {
             self.params.attack.get(),
             self.params.release.get(),
             self.params.gain.get(),
-            self.sample_rate,
+            self.sample_rate.get(),
         );
+
+        self.time
+            .set(self.time.get() + (1.0 / self.sample_rate.get()) * self.block_size as f32);
+
         let gain = gain_from_db(self.params.gain.get());
 
         let (inputs, outputs) = buffer.split();
@@ -171,15 +184,24 @@ impl Plugin for CompressorPlugin {
             *output_l = *input_l * cv * gain;
             *output_r = *input_r * cv * gain;
 
-            let cv_filtered = self.cv_low_pass_filter.process(cv);
+            let cv_filtered = self.cv_lpf.process(cv);
 
-            let amp_filtered = self.amplitude_low_pass_filter.process(input_l + input_r);
-            if self.data_i >= 96 {
-                if !self.cv_producer.is_full() {
-                    self.cv_producer.push(cv_filtered).unwrap();
-                }
-                if !self.amplitude_producer.is_full() {
-                    self.amplitude_producer.push(amp_filtered).unwrap();
+            let amp_filtered_l = self.amplitude_lpf_l.process(*input_l);
+            let amp_filtered_r = self.amplitude_lpf_r.process(*input_r);
+
+            let amp_rms_l = self.amplitude_rms_l.process(*input_l);
+            let amp_rms_r = self.amplitude_rms_r.process(*input_r);
+            if self.data_i >= (self.sample_rate.get() as u32) / 512 {
+                if !self.sample_producer.is_full() {
+                    self.sample_producer
+                        .push(Sample {
+                            left: amp_filtered_l,
+                            right: amp_filtered_r,
+                            left_rms: amp_rms_l,
+                            right_rms: amp_rms_r,
+                            cv: cv_filtered,
+                        })
+                        .unwrap_or(());
                 }
                 self.data_i = 0;
             }

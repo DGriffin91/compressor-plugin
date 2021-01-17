@@ -16,52 +16,6 @@ fn reiss(x: f32, threshold: f32, width: f32, ratio: f32, slope: f32) -> f32 {
     }
 }
 
-struct VariableRingBuf {
-    buffer: Vec<f32>,
-    position: usize,
-    size: usize,
-}
-
-impl VariableRingBuf {
-    fn new(init_size: usize, max_size: usize) -> VariableRingBuf {
-        VariableRingBuf {
-            buffer: vec![0.0; max_size],
-            position: 0,
-            size: init_size,
-        }
-    }
-
-    fn push(&mut self, value: f32) {
-        self.buffer[self.position] = value;
-        self.position = (self.position + 1) % self.size;
-    }
-
-    fn oldest(&self) -> f32 {
-        self.buffer[self.position]
-    }
-
-    fn get(&self, index: usize) -> f32 {
-        let pos = self.position + index;
-        if pos > self.size - 1 {
-            self.buffer[pos - self.size]
-        } else {
-            self.buffer[pos]
-        }
-    }
-
-    fn size(&self) -> usize {
-        self.size
-    }
-
-    fn resize(&mut self, new_size: usize) {
-        self.size = new_size.min(self.buffer.len());
-        self.position = 0;
-        for i in self.buffer.iter_mut() {
-            *i = 0.0;
-        }
-    }
-}
-
 struct DecoupledPeakDetector {
     attack: f32,
     release: f32,
@@ -103,42 +57,6 @@ impl DecoupledPeakDetector {
     fn update(&mut self, attack: f32, release: f32, sample_rate: f32) {
         self.attack = (-1.0 * PI * 1000.0 / attack / sample_rate).exp();
         self.release = (-1.0 * PI * 1000.0 / release / sample_rate).exp();
-    }
-}
-
-struct AccumulatingRMS {
-    buffer: VariableRingBuf,
-    end: f32,
-    new: f32,
-    rms: f32,
-}
-
-impl AccumulatingRMS {
-    fn new(sample_rate: usize, rms_size_ms: f32, rms_max_size_samp: usize) -> AccumulatingRMS {
-        AccumulatingRMS {
-            buffer: VariableRingBuf::new(
-                ((sample_rate as f32) * (rms_size_ms / 1000.0)) as usize,
-                rms_max_size_samp,
-            ),
-            end: 0.0,
-            new: 0.0,
-            rms: 0.0,
-        }
-    }
-    fn resize(&mut self, sample_rate: usize, rms_size_ms: f32) {
-        let new_size = ((sample_rate as f32) * (rms_size_ms / 1000.0)) as usize;
-        if new_size != self.buffer.size() {
-            self.buffer.resize(new_size);
-            self.rms = 0.0;
-        }
-    }
-    fn process(&mut self, value: f32) -> f32 {
-        let new_rms_sample = value.powi(2);
-
-        //remove the oldest rms value, add new one
-        self.rms += -self.buffer.oldest() + new_rms_sample;
-        self.buffer.push(new_rms_sample);
-        (self.rms / self.buffer.size() as f32).sqrt()
     }
 }
 

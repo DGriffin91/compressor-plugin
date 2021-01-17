@@ -13,7 +13,7 @@ pub struct LowPassFilter {
 }
 
 impl LowPassFilter {
-    pub fn new() -> LowPassFilter {
+    pub fn new(freq: f32, sharp: f32, sample_rate: f32) -> LowPassFilter {
         LowPassFilter {
             fd0: 0.0,
             fd1: 0.0,
@@ -21,9 +21,9 @@ impl LowPassFilter {
             fa0: 0.0,
             fa1: 0.0,
             fk: 0.0,
-            freq: 50.0,
-            sharp: 0.2,
-            sample_rate: 44100.0,
+            freq,
+            sharp,
+            sample_rate,
         }
     }
 
