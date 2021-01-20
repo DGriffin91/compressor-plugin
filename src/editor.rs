@@ -1,7 +1,7 @@
 use imgui::*;
 use imgui_knobs::*;
 
-use crate::units::{db_from_gain, from_range, gain_from_db, sign, ConsumerDump, Sample};
+use crate::units::{db_to_lin, from_range, lin_to_db, sign, ConsumerDump};
 use imgui_baseview::{HiDpiMode, ImguiWindow, RenderSettings, Settings};
 
 use crate::compressor_effect_parameters::CompressorEffectParameters;
@@ -30,6 +30,14 @@ const ORANGE_HOVERED: [f32; 4] = [1.0, 0.68, 0.1, 1.0];
 const WAVEFORM_LINES: [f32; 4] = [1.0, 1.0, 1.0, 0.2];
 const TEXT: [f32; 4] = [1.0, 1.0, 1.0, 0.75];
 const DB_LINES: [f32; 4] = [1.0, 1.0, 1.0, 0.15];
+
+pub struct Sample {
+    pub left: f32,
+    pub right: f32,
+    pub left_rms: f32,
+    pub right_rms: f32,
+    pub cv: f32,
+}
 
 pub fn draw_knob(knob: &Knob, wiper_color: &ColorSet, track_color: &ColorSet) {
     knob.draw_arc(
@@ -367,8 +375,8 @@ fn draw_meters(
     draw_meter(
         ui,
         [WINDOW_WIDTH_F - 65.0, 4.0],
-        db_from_gain(left),
-        db_from_gain(recent_peak_l),
+        lin_to_db(left),
+        lin_to_db(recent_peak_l),
         -39.0,
         3.0,
         BLACK,
@@ -381,8 +389,8 @@ fn draw_meters(
     draw_meter(
         ui,
         [WINDOW_WIDTH_F - 65.0, 4.0],
-        db_from_gain(right),
-        db_from_gain(recent_peak_r),
+        lin_to_db(right),
+        lin_to_db(recent_peak_r),
         -39.0,
         3.0,
         BLACK,
@@ -397,8 +405,8 @@ fn draw_meters(
     draw_meter(
         ui,
         [WINDOW_WIDTH_F - 65.0, 4.0],
-        db_from_gain(cv),
-        db_from_gain(recent_peak_cv),
+        lin_to_db(cv),
+        lin_to_db(recent_peak_cv),
         -39.0,
         3.0,
         BLACK,
@@ -409,8 +417,8 @@ fn draw_meters(
     draw_meter(
         ui,
         [WINDOW_WIDTH_F - 65.0, 4.0],
-        db_from_gain(cv),
-        db_from_gain(recent_peak_cv),
+        lin_to_db(cv),
+        lin_to_db(recent_peak_cv),
         -39.0,
         3.0,
         BLACK,
@@ -420,12 +428,12 @@ fn draw_meters(
     move_cursor(ui, -55.0, distance_between_pairs);
     floating_text(ui, "OUT");
     move_cursor(ui, 55.0, 0.0);
-    let gain = gain_from_db(gain);
+    let gain = db_to_lin(gain);
     draw_meter(
         ui,
         [WINDOW_WIDTH_F - 65.0, 4.0],
-        db_from_gain(left * cv * gain),
-        db_from_gain(recent_peak_cv * recent_peak_l * gain),
+        lin_to_db(left * cv * gain),
+        lin_to_db(recent_peak_cv * recent_peak_l * gain),
         -39.0,
         3.0,
         BLACK,
@@ -436,8 +444,8 @@ fn draw_meters(
     draw_meter(
         ui,
         [WINDOW_WIDTH_F - 65.0, 4.0],
-        db_from_gain(right * cv * gain),
-        db_from_gain(recent_peak_cv * recent_peak_r * gain),
+        lin_to_db(right * cv * gain),
+        lin_to_db(recent_peak_cv * recent_peak_r * gain),
         -39.0,
         3.0,
         BLACK,
@@ -458,7 +466,7 @@ fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut Arc<
         ui,
         im_str!("Graph"),
         [WINDOW_WIDTH_F, graph_height],
-        225.0 / gain_from_db(state.params.threshold.get()).powf(0.8), // / 256.0
+        225.0 / db_to_lin(state.params.threshold.get()).powf(0.8), // / 256.0
         0.0,
         2.5,
         sample_data.len(),
@@ -509,7 +517,7 @@ fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut Arc<
             .build();
         let knee_setting = state.params.knee.get();
         if knee_setting > 0.1 {
-            let knee = gain_from_db(knee_setting).powf(0.5) * 6.0;
+            let knee = db_to_lin(knee_setting).powf(0.5) * 6.0;
 
             draw_list.add_rect_filled_multicolor(
                 [0.0, graph_v_center - 92.0],
@@ -684,8 +692,8 @@ impl Editor for CompressorPluginEditor {
                     move_cursor(ui, 0.0, -113.0);
                     draw_meter_knob(
                         ui,
-                        db_from_gain((left + right) * 0.5),
-                        db_from_gain((editor_only.recent_peak_l + editor_only.recent_peak_r) * 0.5),
+                        lin_to_db((left + right) * 0.5),
+                        lin_to_db((editor_only.recent_peak_l + editor_only.recent_peak_r) * 0.5),
                         params.threshold.min,
                         params.threshold.max,
                         line_height * 4.75,

@@ -1,10 +1,10 @@
 use ringbuf::Consumer;
 
-pub fn gain_from_db(decibels: f32) -> f32 {
+pub fn db_to_lin(decibels: f32) -> f32 {
     (10.0f32).powf(decibels * 0.05)
 }
 
-pub fn db_from_gain(gain: f32) -> f32 {
+pub fn lin_to_db(gain: f32) -> f32 {
     gain.max(0.0).log(10.0) * 20.0
 }
 
@@ -16,21 +16,6 @@ pub fn from_range(bottom: f32, top: f32, x: f32) -> f32 {
     (x - bottom) / (top - bottom)
 }
 
-pub fn mix(x: f32, y: f32, a: f32) -> f32 {
-    x * (1.0 - a) + y * a
-}
-
-pub fn clamp(x: f32, min_v: f32, max_v: f32) -> f32 {
-    (x).min(max_v).max(min_v)
-}
-
-pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    // Scale, bias and saturate x to 0..1 range
-    let x = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
-    // Evaluate polynomial
-    x * x * (3.0 - 2.0 * x)
-}
-
 pub fn sign(a: f32, b: f32) -> f32 {
     if b < 0.0 {
         -a
@@ -39,15 +24,15 @@ pub fn sign(a: f32, b: f32) -> f32 {
     }
 }
 
-pub struct VariableRingBuf {
+pub struct VariableRingBuffer {
     buffer: Vec<f32>,
     position: usize,
     size: usize,
 }
 
-impl VariableRingBuf {
-    pub fn new(init_size: usize, max_size: usize) -> VariableRingBuf {
-        VariableRingBuf {
+impl VariableRingBuffer {
+    pub fn new(init_size: usize, max_size: usize) -> VariableRingBuffer {
+        VariableRingBuffer {
             buffer: vec![0.0; max_size],
             position: 0,
             size: init_size,
@@ -85,14 +70,14 @@ impl VariableRingBuf {
     }
 }
 pub struct AccumulatingRMS {
-    buffer: VariableRingBuf,
+    buffer: VariableRingBuffer,
     rms: f32,
 }
 
 impl AccumulatingRMS {
     pub fn new(sample_rate: usize, rms_size_ms: f32, rms_max_size_samp: usize) -> AccumulatingRMS {
         AccumulatingRMS {
-            buffer: VariableRingBuf::new(
+            buffer: VariableRingBuffer::new(
                 ((sample_rate as f32) * (rms_size_ms / 1000.0)) as usize,
                 rms_max_size_samp,
             ),
@@ -100,7 +85,7 @@ impl AccumulatingRMS {
         }
     }
     pub fn resize(&mut self, sample_rate: usize, rms_size_ms: f32) {
-        let new_size = ((sample_rate as f32) * (rms_size_ms / 1000.0)) as usize;
+        let new_size = (((sample_rate as f32) * (rms_size_ms / 1000.0)) as usize).max(1);
         if new_size != self.buffer.size() {
             self.buffer.resize(new_size);
             self.rms = 0.0;
@@ -113,24 +98,6 @@ impl AccumulatingRMS {
         self.rms += -self.buffer.oldest() + new_rms_sample;
         self.buffer.push(new_rms_sample);
         (self.rms / self.buffer.size() as f32).sqrt()
-    }
-}
-pub struct Sample {
-    pub left: f32,
-    pub right: f32,
-    pub left_rms: f32,
-    pub right_rms: f32,
-    pub cv: f32,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_from_range() {
-        let value: f32 = -40.0;
-        let result = from_range(-36.0, 3.0, value.max(-36.0).min(3.0));
-        dbg!(result);
     }
 }
 

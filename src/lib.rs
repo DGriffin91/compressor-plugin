@@ -1,22 +1,19 @@
 //! Compressor baseview imgui plugin
-//TODO Use transfer and smooth https://github.com/RustAudio/vst-rs/blob/master/examples/transfer_and_smooth.rs
-//TODO manually draw graph
 
 #[macro_use]
 extern crate vst;
 
 pub mod compressor;
-pub mod compressor2;
 mod compressor_effect_parameters;
 mod editor;
 pub mod low_pass_filter;
 mod parameter;
 pub mod units;
 
-use compressor2::Compressor2;
+use compressor::Compressor;
 use compressor_effect_parameters::CompressorEffectParameters;
 use editor::{CompressorPluginEditor, EditorOnlyState, EditorState};
-use units::{gain_from_db, ConsumerDump, Sample};
+use units::{db_to_lin, ConsumerDump};
 
 use vst::buffer::AudioBuffer;
 use vst::editor::Editor;
@@ -35,8 +32,8 @@ struct CompressorPlugin {
     editor: Option<CompressorPluginEditor>,
     time: Arc<AtomicFloat>,
     sample_rate: Arc<AtomicFloat>,
-    compressor: Compressor2,
-    sample_producer: Producer<Sample>,
+    compressor: Compressor,
+    sample_producer: Producer<editor::Sample>,
     cv_lpf: low_pass_filter::LowPassFilter,
     amplitude_lpf_l: low_pass_filter::LowPassFilter,
     amplitude_lpf_r: low_pass_filter::LowPassFilter,
@@ -52,7 +49,7 @@ impl Default for CompressorPlugin {
         let time = Arc::new(AtomicFloat::new(0.0));
         let sample_rate = Arc::new(AtomicFloat::new(44100.0));
 
-        let sample_ring = RingBuffer::<Sample>::new(DATA_SIZE);
+        let sample_ring = RingBuffer::<editor::Sample>::new(DATA_SIZE);
         let (sample_producer, sample_consumer) = sample_ring.split();
         Self {
             params: params.clone(),
@@ -74,7 +71,7 @@ impl Default for CompressorPlugin {
                     })),
                 }),
             }),
-            compressor: Compressor2::new(),
+            compressor: Compressor::new(),
             cv_lpf: low_pass_filter::LowPassFilter::new(50.0, 0.2, 44100.0),
             amplitude_lpf_l: low_pass_filter::LowPassFilter::new(50.0, 0.2, 44100.0),
             amplitude_lpf_r: low_pass_filter::LowPassFilter::new(50.0, 0.2, 44100.0),
@@ -164,7 +161,7 @@ impl Plugin for CompressorPlugin {
         self.time
             .set(self.time.get() + (1.0 / self.sample_rate.get()) * self.block_size as f32);
 
-        let gain = gain_from_db(self.params.gain.get());
+        let gain = db_to_lin(self.params.gain.get());
 
         let (inputs, outputs) = buffer.split();
         let (inputs_left, inputs_right) = inputs.split_at(1);
@@ -194,7 +191,7 @@ impl Plugin for CompressorPlugin {
             if self.data_i >= (self.sample_rate.get() as u32) / 512 {
                 if !self.sample_producer.is_full() {
                     self.sample_producer
-                        .push(Sample {
+                        .push(editor::Sample {
                             left: amp_filtered_l,
                             right: amp_filtered_r,
                             left_rms: amp_rms_l,
