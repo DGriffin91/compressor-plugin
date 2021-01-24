@@ -1,7 +1,11 @@
-# rust-imgui-compressor-plugin (Experimental/WIP)
+# compressor-plugin (Experimental/WIP)
 A compressor vst plugin in rust, using imgui. 
 
 The plugin logs events to `~/tmp/IMGUIBaseviewCompressor.log`.
+
+Parameters for RMS & pre-smoothing have not been added to the GUI yet. Use your DAW's GUI-less mode to access these parameters.
+
+This plugin is in very early stages of development. Until version 1.0, parameters will change and compatibility will not be kept between updates. 
 
 ## Usage: macOS (Untested)
 

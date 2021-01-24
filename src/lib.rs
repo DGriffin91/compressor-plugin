@@ -144,7 +144,6 @@ impl Plugin for CompressorPlugin {
         }
     }
 
-    // Here is where the bulk of our audio processing code goes.
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
         self.compressor.update_prams(
             self.params.threshold.get(),
