@@ -7,6 +7,8 @@ Parameters for RMS & pre-smoothing have not been added to the GUI yet. Use your 
 
 This plugin is in very early stages of development. Until version 1.0, parameters will change and compatibility will not be kept between updates. 
 
+![Demo](demo.png)
+
 ## Usage: macOS (Untested)
 
 - Run `scripts/macos-build-and-install.sh`
