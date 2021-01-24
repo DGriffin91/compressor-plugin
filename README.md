@@ -1,4 +1,4 @@
-# compressor-plugin (Experimental/WIP)
+# Experimental/WIP Compressor Plugin
 A compressor vst plugin in rust, using imgui. 
 
 The plugin logs events to `~/tmp/IMGUIBaseviewCompressor.log`.
