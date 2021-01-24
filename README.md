@@ -17,12 +17,12 @@ This plugin is in very early stages of development. Until version 1.0, parameter
 ## Usage: Windows
 
 - Run `cargo build --release`
-- Copy `target/debug/compressor_plugin.dll` to your VST plugin folder
+- Copy `target/release/compressor_plugin.dll` to your VST plugin folder
 - Start your DAW, test the plugin
 
 ## Usage: Linux (Untested)
 
 - Run `cargo build --release`
-- Copy `target/debug/compressor_plugin.so` to your VST plugin folder
+- Copy `target/release/compressor_plugin.so` to your VST plugin folder
 - Start your DAW, test the plugin
 
