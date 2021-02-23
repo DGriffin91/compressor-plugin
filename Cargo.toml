@@ -19,6 +19,6 @@ raw-window-handle = "0.3"
 vst = "0.2"
 rtrb = "0.1.1"
 imgui-baseview = {git = "https://github.com/BillyDM/imgui-baseview", branch = "main"}
-imgui = "0.6.1"
+imgui = "0.7"
 imgui-knobs = {git = "https://github.com/DGriffin91/imgui-rs-knobs", branch = "main"}
 ringbuf = "0.2"
