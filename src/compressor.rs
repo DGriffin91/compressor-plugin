@@ -108,8 +108,8 @@ impl Compressor {
     ) {
         //TODO don't update here unnecessarily
         self.ratio = ratio;
-        self.gain = db_to_lin(gain);
-        self.threshold = threshold;
+        self.gain = gain;
+        self.threshold = lin_to_db(threshold);
         self.knee = knee;
 
         self.slope = 1.0 / self.ratio - 1.0;
@@ -134,10 +134,10 @@ impl Compressor {
 
         self.envelope = detector_input + self.pre_smooth_gain * (self.envelope - detector_input);
 
-        self.envelope = if self.envelope.is_finite() {
-            self.envelope
-        } else {
+        self.envelope = if self.envelope.is_nan() || self.envelope.is_infinite() {
             1.0
+        } else {
+            self.envelope
         };
 
         let db = lin_to_db(self.envelope);

@@ -1,19 +1,14 @@
+use baseplug::{AtomicFloat, UIFloatParam};
 use imgui::*;
 use imgui_knobs::*;
 
-use crate::units::{db_to_lin, from_range, lin_to_db, sign, ConsumerDump};
-use imgui_baseview::{HiDpiMode, ImguiWindow, RenderSettings, Settings};
-
-use crate::compressor_effect_parameters::CompressorEffectParameters;
-use crate::parameter::Parameter;
-
-use vst::editor::Editor;
-
-use baseview::{Size, WindowOpenOptions, WindowScalePolicy};
+use crate::{
+    units::{db_to_lin, from_range, lin_to_db, sign, ConsumerDump},
+    CompressorPluginModelUI,
+};
 
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
-use std::sync::{Arc, Mutex};
-use vst::util::AtomicFloat;
+use std::sync::Arc;
 
 const WINDOW_WIDTH: usize = 1024;
 const WINDOW_HEIGHT: usize = 1024;
@@ -39,6 +34,9 @@ pub struct Sample {
     pub cv: f32,
 }
 
+unsafe impl Send for Sample {}
+unsafe impl Sync for Sample {}
+
 pub fn draw_knob(knob: &Knob, wiper_color: &ColorSet, track_color: &ColorSet) {
     knob.draw_arc(
         0.8,
@@ -56,58 +54,47 @@ pub fn draw_knob(knob: &Knob, wiper_color: &ColorSet, track_color: &ColorSet) {
 
 pub fn make_knob(
     ui: &Ui,
-    parameter: &Parameter,
+    parameter: &mut UIFloatParam,
     wiper_color: &ColorSet,
     track_color: &ColorSet,
     title_fix: f32,
 ) {
     let width = ui.text_line_height() * 4.75;
     let w = ui.push_item_width(width);
-    let title = parameter.get_name();
+    let title = parameter.name();
     let knob_id = &ImString::new(format!("##{}_KNOB_CONTORL_", title));
     knob_title(ui, &ImString::new(title.clone().to_uppercase()), width);
     let cursor = ui.cursor_pos();
     ui.set_cursor_pos([cursor[0], cursor[1] + 5.0]);
-    let mut val = parameter.get();
-    let knob = Knob::new(
-        ui,
-        knob_id,
-        &mut val,
-        parameter.min,
-        parameter.max,
-        parameter.default,
-        width * 0.5,
-        true,
-    );
-    let cursor = ui.cursor_pos();
-    ui.set_cursor_pos([cursor[0] + title_fix, cursor[1] - 10.0]);
-    knob_title(ui, &ImString::new(parameter.get_display()), width);
+    let mut val = parameter.normalized();
+    let value_changed = {
+        let knob = Knob::new(ui, knob_id, &mut val, 0.0, 1.0, 0.5, width * 0.5, true);
+        let cursor = ui.cursor_pos();
+        ui.set_cursor_pos([cursor[0] + title_fix, cursor[1] - 10.0]);
+        knob_title(
+            ui,
+            &ImString::new(format!("{:.2}", parameter.value())),
+            width,
+        );
 
-    if knob.value_changed {
-        parameter.set(*knob.p_value)
+        w.pop(ui);
+        draw_knob(&knob, wiper_color, track_color);
+        knob.value_changed
+    };
+
+    if value_changed {
+        parameter.set_from_normalized(val)
     }
-
-    w.pop(ui);
-    draw_knob(&knob, wiper_color, track_color);
 }
 
-pub struct EditorOnlyState {
+pub struct EditorState {
+    pub model: CompressorPluginModelUI,
+    pub sample_rate: Arc<AtomicFloat>,
+    pub time: Arc<AtomicFloat>,
     pub sample_data: ConsumerDump<Sample>,
     pub recent_peak_l: f32,
     pub recent_peak_r: f32,
     pub recent_peak_cv: f32,
-}
-
-pub struct EditorState {
-    pub params: Arc<CompressorEffectParameters>,
-    pub editor_only: Arc<Mutex<EditorOnlyState>>,
-    pub sample_rate: Arc<AtomicFloat>,
-    pub time: Arc<AtomicFloat>,
-}
-
-pub struct CompressorPluginEditor {
-    pub is_open: bool,
-    pub state: Arc<EditorState>,
 }
 
 fn draw_graph<F: Fn(usize) -> f32>(
@@ -428,7 +415,6 @@ fn draw_meters(
     move_cursor(ui, -55.0, distance_between_pairs);
     floating_text(ui, "OUT");
     move_cursor(ui, 55.0, 0.0);
-    let gain = db_to_lin(gain);
     draw_meter(
         ui,
         [WINDOW_WIDTH_F - 65.0, 4.0],
@@ -456,17 +442,16 @@ fn draw_meters(
     ui.set_cursor_pos([start_cursor_x, cursor[1] + 160.0]);
 }
 
-fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut Arc<EditorState>) {
+fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut EditorState) {
     let init_cursor = ui.cursor_pos();
-    let editor_only = state.editor_only.lock().unwrap();
-    let sample_data = &editor_only.sample_data.data;
+    let sample_data = &state.sample_data.data;
     let col = ui.push_style_color(StyleColor::PlotLines, ORANGE);
     let col2 = ui.push_style_color(StyleColor::PlotLinesHovered, ORANGE);
     draw_graph(
         ui,
         im_str!("Graph"),
         [WINDOW_WIDTH_F, graph_height],
-        225.0 / db_to_lin(state.params.threshold.get()).powf(0.8), // / 256.0
+        225.0 / db_to_lin(state.model.threshold.value()).powf(0.8), // / 256.0
         0.0,
         2.5,
         sample_data.len(),
@@ -515,7 +500,7 @@ fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut Arc<
             )
             .filled(true)
             .build();
-        let knee_setting = state.params.knee.get();
+        let knee_setting = state.model.knee.value();
         if knee_setting > 0.1 {
             let knee = db_to_lin(knee_setting).powf(0.5) * 6.0;
 
@@ -572,187 +557,136 @@ fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut Arc<
     col2.pop(ui);
     ui.set_cursor_pos(init_cursor);
     move_cursor(ui, 12.0, 108.0);
-    floating_text(ui, &state.params.threshold.get_display());
+    floating_text(ui, &state.model.threshold.name());
     ui.set_cursor_pos(init_cursor);
     move_cursor(ui, 0.0, graph_height);
 }
 
-impl Editor for CompressorPluginEditor {
-    fn position(&self) -> (i32, i32) {
-        (0, 0)
-    }
+pub fn editor(ui: &Ui, editor_state: &mut EditorState) {
+    editor_state.sample_data.consume();
 
-    fn size(&self) -> (i32, i32) {
-        (WINDOW_WIDTH as i32, WINDOW_HEIGHT as i32)
-    }
-
-    fn open(&mut self, parent: *mut ::std::ffi::c_void) -> bool {
-        //::log::info!("self.running {}", self.running);
-        if self.is_open {
-            return false;
+    let w = Window::new(im_str!("Example 1: Basic sliders"))
+        .size([WINDOW_WIDTH_F, WINDOW_HEIGHT_F], Condition::Appearing)
+        .position([0.0, 0.0], Condition::Appearing)
+        .draw_background(false)
+        .no_decoration()
+        .movable(false);
+    w.build(&ui, || {
+        let text_style_color = ui.push_style_color(StyleColor::Text, TEXT);
+        let graph_v_center = 225.0 + 25.0;
+        {
+            let draw_list = ui.get_window_draw_list();
+            draw_list.add_rect_filled_multicolor(
+                [0.0, 0.0],
+                [WINDOW_WIDTH_F, 200.0],
+                BLACK,
+                BLACK,
+                BG_COLOR,
+                BG_COLOR,
+            );
+            draw_list
+                .add_rect([0.0, 200.0], [WINDOW_WIDTH_F, WINDOW_HEIGHT_F], BG_COLOR)
+                .filled(true)
+                .build();
+            draw_list
+                .add_rect(
+                    [0.0, graph_v_center - 92.0],
+                    [WINDOW_WIDTH_F, graph_v_center + 92.0],
+                    [0.0, 0.0, 0.0, 0.65],
+                )
+                .filled(true)
+                .build();
+        }
+        ui.set_cursor_pos([0.0, 25.0]);
+        draw_graphs(ui, graph_v_center, 450.0, editor_state);
+        let mut left = 0.0;
+        let mut right = 0.0;
+        let mut cv = 0.0;
+        if editor_state.sample_data.data.len() > 0 {
+            let last = editor_state.sample_data.data.len() - 1;
+            left = editor_state.sample_data.data[last].left_rms;
+            right = editor_state.sample_data.data[last].right_rms;
+            cv = editor_state.sample_data.data[last].cv;
+            if (editor_state.time.get() * 10.0) as u32 % 10 == 0 {
+                editor_state.recent_peak_l = left;
+                editor_state.recent_peak_r = right;
+                editor_state.recent_peak_cv = cv;
+            } else {
+                editor_state.recent_peak_l = editor_state.recent_peak_l.max(left);
+                editor_state.recent_peak_r = editor_state.recent_peak_r.max(right);
+                editor_state.recent_peak_cv = editor_state.recent_peak_cv.min(cv);
+            }
         }
 
-        self.is_open = true;
+        let highlight = ColorSet::new(ORANGE, ORANGE_HOVERED, ORANGE_HOVERED);
 
-        let settings = Settings {
-            window: WindowOpenOptions {
-                title: String::from("imgui-baseview demo window"),
-                size: Size::new(WINDOW_WIDTH as f64, WINDOW_HEIGHT as f64),
-                scale: WindowScalePolicy::SystemScaleFactor,
-            },
-            clear_color: (0.0, 0.0, 0.0),
-            hidpi_mode: HiDpiMode::Default,
-            render_settings: RenderSettings::default(),
-        };
+        let model = &mut editor_state.model;
 
-        ImguiWindow::open_parented(
-            &VstParent(parent),
-            settings,
-            self.state.clone(),
-            |ctx: &mut Context, _state: &mut Arc<EditorState>| {
-                ctx.fonts().add_font(&[FontSource::TtfData {
-                    data: include_bytes!("../FiraCode-Regular.ttf"),
-                    size_pixels: 20.0,
-                    config: None,
-                }]);
-            },
-            |_run: &mut bool, ui: &Ui, state: &mut Arc<EditorState>| {
-                {
-                    let mut editor_only = state.editor_only.lock().unwrap();
-                    editor_only.sample_data.consume();
-                }
-                //ui.show_demo_window(run);
-                let w = Window::new(im_str!("Example 1: Basic sliders"))
-                    .size([WINDOW_WIDTH_F, WINDOW_HEIGHT_F], Condition::Appearing)
-                    .position([0.0, 0.0], Condition::Appearing)
-                    .draw_background(false)
-                    .no_decoration()
-                    .movable(false);
-                w.build(&ui, || {
-                    let text_style_color = ui.push_style_color(StyleColor::Text, TEXT);
-                    let graph_v_center = 225.0 + 25.0;
-                    {
-                        let draw_list = ui.get_window_draw_list();
-                        draw_list.add_rect_filled_multicolor(
-                            [0.0, 0.0],
-                            [WINDOW_WIDTH_F, 200.0],
-                            BLACK,
-                            BLACK,
-                            BG_COLOR,
-                            BG_COLOR,
-                        );
-                        draw_list
-                            .add_rect([0.0, 200.0], [WINDOW_WIDTH_F, WINDOW_HEIGHT_F], BG_COLOR)
-                            .filled(true)
-                            .build();
-                        draw_list
-                            .add_rect(
-                                [0.0, graph_v_center - 92.0],
-                                [WINDOW_WIDTH_F, graph_v_center + 92.0],
-                                [0.0, 0.0, 0.0, 0.65],
-                            )
-                            .filled(true)
-                            .build();
-                    }
-                    ui.set_cursor_pos([0.0, 25.0]);
-                    draw_graphs(ui, graph_v_center, 450.0, state);
+        let line_height = ui.text_line_height();
 
-                    let mut editor_only = state.editor_only.lock().unwrap();
+        let lowlight = ColorSet::from(BLACK);
+        ui.columns(7, im_str!("cols"), false);
+        let width = WINDOW_WIDTH_F / 6.75;
+        for i in 1..7 {
+            ui.set_column_width(i, width);
+        }
+        ui.set_column_width(0, width * 0.5);
 
-                    let last = editor_only.sample_data.data.len() - 1;
-                    let left = editor_only.sample_data.data[last].left_rms;
-                    let right = editor_only.sample_data.data[last].right_rms;
-                    let cv = editor_only.sample_data.data[last].cv;
-                    if (state.time.get() * 10.0) as u32 % 10 == 0 {
-                        editor_only.recent_peak_l = left;
-                        editor_only.recent_peak_r = right;
-                        editor_only.recent_peak_cv = cv;
-                    } else {
-                        editor_only.recent_peak_l = editor_only.recent_peak_l.max(left);
-                        editor_only.recent_peak_r = editor_only.recent_peak_r.max(right);
-                        editor_only.recent_peak_cv = editor_only.recent_peak_cv.min(cv);
-                    }
+        ui.next_column();
+        make_knob(ui, &mut model.threshold, &highlight, &lowlight, 0.0);
+        move_cursor(ui, 0.0, -113.0);
+        draw_meter_knob(
+            ui,
+            lin_to_db((left + right) * 0.5),
+            lin_to_db((editor_state.recent_peak_l + editor_state.recent_peak_r) * 0.5),
+            model.threshold.min_max().0,
+            model.threshold.min_max().1,
+            line_height * 4.75,
+            1.0,
+            GREEN,
+            BLACK,
+        );
+        ui.next_column();
 
-                    let highlight = ColorSet::new(ORANGE, ORANGE_HOVERED, ORANGE_HOVERED);
+        make_knob(ui, &mut model.knee, &highlight, &lowlight, 0.0);
+        ui.next_column();
 
-                    let params = &state.params;
+        //make_knob(ui, &mut model.pre_smooth, &highlight, &lowlight);
+        //ui.next_column();
 
-                    let line_height = ui.text_line_height();
+        //make_knob(ui, &mut model.rms, &highlight, &lowlight);
+        //ui.next_column();
 
-                    let lowlight = ColorSet::from(BLACK);
-                    ui.columns(7, im_str!("cols"), false);
-                    let width = WINDOW_WIDTH_F / 6.75;
-                    for i in 1..7 {
-                        ui.set_column_width(i, width);
-                    }
-                    ui.set_column_width(0, width * 0.5);
+        make_knob(ui, &mut model.ratio, &highlight, &lowlight, 0.0);
+        ui.next_column();
 
-                    ui.next_column();
-                    make_knob(ui, &params.threshold, &highlight, &lowlight, 0.0);
-                    move_cursor(ui, 0.0, -113.0);
-                    draw_meter_knob(
-                        ui,
-                        lin_to_db((left + right) * 0.5),
-                        lin_to_db((editor_only.recent_peak_l + editor_only.recent_peak_r) * 0.5),
-                        params.threshold.min,
-                        params.threshold.max,
-                        line_height * 4.75,
-                        1.0,
-                        GREEN,
-                        BLACK,
-                    );
-                    ui.next_column();
+        make_knob(ui, &mut model.attack, &highlight, &lowlight, 0.0);
+        ui.next_column();
 
-                    make_knob(ui, &params.knee, &highlight, &lowlight, 0.0);
-                    ui.next_column();
+        make_knob(ui, &mut model.release, &highlight, &lowlight, 0.0);
+        ui.next_column();
 
-                    //make_knob(ui, &params.pre_smooth, &highlight, &lowlight);
-                    //ui.next_column();
+        make_knob(ui, &mut model.gain, &highlight, &lowlight, 0.0);
+        ui.next_column();
 
-                    //make_knob(ui, &params.rms, &highlight, &lowlight);
-                    //ui.next_column();
+        ui.columns(1, im_str!("nocols"), false);
 
-                    make_knob(ui, &params.ratio, &highlight, &lowlight, 0.0);
-                    ui.next_column();
+        //ui.label_text(im_str!("left"), &ImString::new(left.to_string()));
 
-                    make_knob(ui, &params.attack, &highlight, &lowlight, 0.0);
-                    ui.next_column();
-
-                    make_knob(ui, &params.release, &highlight, &lowlight, 0.0);
-                    ui.next_column();
-
-                    make_knob(ui, &params.gain, &highlight, &lowlight, 0.0);
-                    ui.next_column();
-
-                    ui.columns(1, im_str!("nocols"), false);
-
-                    move_cursor(ui, 0.0, 84.0);
-                    draw_meters(
-                        ui,
-                        left,
-                        right,
-                        cv,
-                        editor_only.recent_peak_l,
-                        editor_only.recent_peak_r,
-                        editor_only.recent_peak_cv,
-                        params.gain.get(),
-                    );
-
-                    text_style_color.pop(ui);
-                });
-            },
+        move_cursor(ui, 0.0, 84.0);
+        draw_meters(
+            ui,
+            left,
+            right,
+            cv,
+            editor_state.recent_peak_l,
+            editor_state.recent_peak_r,
+            editor_state.recent_peak_cv,
+            db_to_lin(model.gain.value()),
         );
 
-        true
-    }
-
-    fn is_open(&mut self) -> bool {
-        self.is_open
-    }
-
-    fn close(&mut self) {
-        self.is_open = false;
-    }
+        text_style_color.pop(ui);
+    });
 }
 
 struct VstParent(*mut ::std::ffi::c_void);

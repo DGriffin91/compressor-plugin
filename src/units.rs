@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use ringbuf::Consumer;
 
 pub fn db_to_lin(decibels: f32) -> f32 {
@@ -97,19 +99,25 @@ impl AccumulatingRMS {
         //remove the oldest rms value, add new one
         self.rms += -self.buffer.oldest() + new_rms_sample;
         self.buffer.push(new_rms_sample);
-        (self.rms / self.buffer.size() as f32).sqrt()
+        let res = (self.rms / self.buffer.size() as f32).sqrt();
+
+        if res.is_nan() || res.is_infinite() {
+            0.0
+        } else {
+            res
+        }
     }
 }
 
 //find a better name?
 pub struct ConsumerDump<T> {
     pub data: Vec<T>,
-    consumer: Consumer<T>,
+    consumer: Arc<Mutex<Consumer<T>>>,
     max_size: usize,
 }
 
 impl<T> ConsumerDump<T> {
-    pub fn new(consumer: Consumer<T>, max_size: usize) -> ConsumerDump<T> {
+    pub fn new(consumer: Arc<Mutex<Consumer<T>>>, max_size: usize) -> ConsumerDump<T> {
         ConsumerDump {
             data: Vec::new(),
             consumer,
@@ -118,11 +126,14 @@ impl<T> ConsumerDump<T> {
     }
 
     pub fn consume(&mut self) {
-        for _ in 0..self.consumer.len() {
-            if let Some(n) = self.consumer.pop() {
-                self.data.push(n);
-            } else {
-                break;
+        {
+            let mut consumer = self.consumer.lock().unwrap();
+            for _ in 0..consumer.len() {
+                if let Some(n) = consumer.pop() {
+                    self.data.push(n);
+                } else {
+                    break;
+                }
             }
         }
         self.trim_data()
