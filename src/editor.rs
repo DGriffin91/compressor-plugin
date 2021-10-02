@@ -4,7 +4,7 @@ use imgui_knobs::*;
 
 use crate::{
     units::{db_to_lin, from_range, lin_to_db, sign, ConsumerDump},
-    CompressorPluginModelUI,
+    CompressorPlugin, CompressorPluginModelUI,
 };
 
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
@@ -54,7 +54,7 @@ pub fn draw_knob(knob: &Knob, wiper_color: &ColorSet, track_color: &ColorSet) {
 
 pub fn make_knob(
     ui: &Ui,
-    parameter: &mut UIFloatParam,
+    parameter: &mut UIFloatParam<crate::CompressorPluginModel, crate::CompressorPluginModelSmooth>,
     wiper_color: &ColorSet,
     track_color: &ColorSet,
     title_fix: f32,
@@ -73,7 +73,7 @@ pub fn make_knob(
         ui.set_cursor_pos([cursor[0] + title_fix, cursor[1] - 10.0]);
         knob_title(
             ui,
-            &ImString::new(format!("{:.2}", parameter.value())),
+            &ImString::new(format!("{:.2}", parameter.unit_value())),
             width,
         );
 
@@ -88,7 +88,7 @@ pub fn make_knob(
 }
 
 pub struct EditorState {
-    pub model: CompressorPluginModelUI,
+    pub model: CompressorPluginModelUI<CompressorPlugin>,
     pub sample_rate: Arc<AtomicFloat>,
     pub time: Arc<AtomicFloat>,
     pub sample_data: ConsumerDump<Sample>,
@@ -451,7 +451,7 @@ fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut Edit
         ui,
         im_str!("Graph"),
         [WINDOW_WIDTH_F, graph_height],
-        225.0 / db_to_lin(state.model.threshold.value()).powf(0.8), // / 256.0
+        225.0 / db_to_lin(state.model.threshold.unit_value()).powf(0.8), // / 256.0
         0.0,
         2.5,
         sample_data.len(),
@@ -500,7 +500,7 @@ fn draw_graphs(ui: &Ui, graph_v_center: f32, graph_height: f32, state: &mut Edit
             )
             .filled(true)
             .build();
-        let knee_setting = state.model.knee.value();
+        let knee_setting = state.model.knee.unit_value();
         if knee_setting > 0.1 {
             let knee = db_to_lin(knee_setting).powf(0.5) * 6.0;
 
@@ -682,7 +682,7 @@ pub fn editor(ui: &Ui, editor_state: &mut EditorState) {
             editor_state.recent_peak_l,
             editor_state.recent_peak_r,
             editor_state.recent_peak_cv,
-            db_to_lin(model.gain.value()),
+            db_to_lin(model.gain.unit_value()),
         );
 
         text_style_color.pop(ui);

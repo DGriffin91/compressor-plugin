@@ -9,7 +9,7 @@ crate-type = ["cdylib", "lib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-baseplug = { git = "https://github.com/DGriffin91/baseplug.git"}
+baseplug = { git = "https://github.com/DGriffin91/baseplug.git", branch = "shared"}
 baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "d399c1275522ae75f5a82caadd904df2685c8660" }
 imgui-baseview = { git = "https://github.com/BillyDM/imgui-baseview.git" }
 imgui = "0.7"

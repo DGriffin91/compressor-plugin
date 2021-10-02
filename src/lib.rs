@@ -10,7 +10,9 @@ use basic_audio_filters::second_order_iir::{IIR2Coefficients, IIR2};
 use compressor::Compressor;
 use editor::{editor, EditorState};
 
-use baseplug::{AtomicFloat, Model, Plugin, PluginContext, ProcessContext, WindowOpenResult};
+use baseplug::{
+    AtomicFloat, Model, Plugin, PluginContext, PluginUI, ProcessContext, WindowOpenResult,
+};
 use baseview::{Size, WindowOpenOptions, WindowScalePolicy};
 use imgui::{Context, FontSource, Ui};
 use imgui_baseview::{HiDpiMode, ImguiWindow, RenderSettings, Settings};
@@ -127,7 +129,7 @@ impl PluginContext<CompressorPlugin> for CompressorPluginShared {
     }
 }
 
-struct CompressorPlugin {
+pub struct CompressorPlugin {
     time: Arc<AtomicFloat>,
     sample_rate: Arc<AtomicFloat>,
     compressor: Compressor,
@@ -315,7 +317,11 @@ impl baseplug::PluginUI for CompressorPlugin {
 
     fn ui_param_notify(
         _handle: &Self::Handle,
-        _param: &'static baseplug::Param<Self, <Self::Model as baseplug::Model<Self>>::Smooth>,
+        _param: &'static baseplug::Param<
+            Self,
+            <Self::Model as Model<Self>>::Smooth,
+            <Self as PluginUI>::Handle,
+        >,
         _val: f32,
     ) {
     }
